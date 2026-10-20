@@ -900,13 +900,15 @@ def guest_scheme(
     caller.
 
     Raises TableError when the table does not pass `check_table` or the
-    parameters contradict it.  `check_table` makes sure that one label fits
-    at any seat; with two seats of the guest the second label must also
-    keep off the first one, so in a very crowded spot the labels of a
-    two-seat record may still find no room: then TableError names only the
-    seat numbers ("seat 5: no room for the '+1' label").  The usual case of
-    it, two seats right across a narrow arm at the edge of the field, is
-    handled: the label goes onto the arm between them.
+    parameters contradict it.  `check_table` makes sure that a label fits
+    at any single seat.  With two seats of the guest each label also keeps
+    off the other seat of the guest and off the label placed before it.
+    When the two seats face each other across a narrow arm at the edge of
+    the field, a label goes onto the arm between them, even close to the
+    other seat.  The labels may still find no room when both can only go
+    onto that same spot, their outward spots being out of the field or
+    taken: then TableError names only the seat numbers ("seat 5: no room
+    for the '+1' label").
     """
     plan = _checked(table)
     total = len(plan.seats)

@@ -441,6 +441,41 @@ class LabelTest(unittest.TestCase):
         self.assertEqual(label_spots(guest(table, [5, 1], pair=NO_COUPLE)), [("47", "132.5", "start")])
         self.assertEqual(label_spots(guest(table, [4, 2], pair=NO_COUPLE)), [("47", "174.5", "start")])
 
+    def test_the_ring_of_the_other_own_seat_keeps_a_label_off_in_the_first_passes(self):
+        # Seats 3 and 4 sit one above the other on the right, at the edge of
+        # the field.  The free spot below seat 3 is too close to the ring of
+        # seat 4, so the label goes left onto the arm (second pass).
+        table = {
+            "label": "Two blocks",
+            "arms": [
+                {"id": "post", "x": 224, "y": 62, "width": 37, "height": 141},
+                {"id": "block", "x": 170, "y": 48, "width": 97, "height": 103},
+            ],
+            "seats": [{"arm": "block", "side": "right", "count": 3}, {"arm": "post", "side": "right"}],
+        }
+        self.assertEqual(check_table(table).errors, [])
+        self.assertEqual(label_spots(guest(table, [3, 4], pair=NO_COUPLE)), [("268", "136", "end")])
+
+    def test_a_label_lies_on_an_arm_before_it_comes_close_to_the_other_own_seat(self):
+        # The label of seat 12 goes down onto its narrow arm (second pass)
+        # rather than up next to seat 17 (only the last pass allows that).
+        table = {
+            "label": "Bar and block",
+            "arms": [
+                {"id": "bar", "x": 25, "y": 248, "width": 266, "height": 20},
+                {"id": "block", "x": 125, "y": 48, "width": 121, "height": 109},
+            ],
+            "seats": [
+                {"arm": "block", "side": "top", "count": 2},
+                {"arm": "block", "side": "left"},
+                {"arm": "bar", "side": "bottom", "count": 6},
+                {"arm": "bar", "side": "top", "count": 6},
+                {"arm": "block", "side": "bottom", "count": 2},
+            ],
+        }
+        self.assertEqual(check_table(table).errors, [])
+        self.assertEqual(label_spots(guest(table, [12, 17], pair=NO_COUPLE)), [("137", "254", "middle")])
+
     def test_two_labels_without_room_raise_with_seat_numbers_only(self):
         # As above, but the outward spot of seat 2 is taken by the seats of a
         # second arm: both labels need the one spot on the narrow arm.

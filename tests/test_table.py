@@ -379,6 +379,15 @@ def label_spots(scheme: dict) -> list[tuple[str, str, str]]:
     return [(label["x"], label["y"], label["anchor"]) for label in scheme["labels"]]
 
 
+def narrow_table() -> dict:
+    """One arm 20 px wide near the left edge: 2 seats on the right, 4 on the left."""
+    return {
+        "label": "Narrow table",
+        "arms": [{"id": "main", "x": 48, "y": 37, "width": 20, "height": 233}],
+        "seats": [{"arm": "main", "side": "right", "count": 2}, {"arm": "main", "side": "left", "count": 4}],
+    }
+
+
 class LabelTest(unittest.TestCase):
     def test_you_and_plus_one_next_to_seats_8_and_9_as_in_the_mockup(self):
         scheme = guest(l_table_shifted(), [8, 9], [9])
@@ -418,6 +427,39 @@ class LabelTest(unittest.TestCase):
         scheme = guest(l_table(), [8, 9])
         self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in scheme["labels"]], [(True, False)])
         self.assertFalse(scheme["single"])
+
+    def test_label_between_two_own_seats_across_a_narrow_arm(self):
+        # Seats 1 and 5 face each other across an arm 20 px wide at the left
+        # edge: the label of seat 5 can only go onto the arm, closer to the
+        # ring of seat 1 than the first two passes allow.
+        table = narrow_table()
+        self.assertEqual(check_table(table).errors, [])
+        self.assertEqual(
+            label_spots(guest(table, [1, 5], [5], pair=NO_COUPLE)),
+            [("111", "132.5", "start"), ("47", "132.5", "start")],
+        )
+        self.assertEqual(label_spots(guest(table, [5, 1], pair=NO_COUPLE)), [("47", "132.5", "start")])
+        self.assertEqual(label_spots(guest(table, [4, 2], pair=NO_COUPLE)), [("47", "174.5", "start")])
+
+    def test_two_labels_without_room_raise_with_seat_numbers_only(self):
+        # As above, but the outward spot of seat 2 is taken by the seats of a
+        # second arm: both labels need the one spot on the narrow arm.
+        table = narrow_table()
+        table["label"] = "Qzlabel"
+        table["arms"] = [
+            {"id": "qzwest", "x": 48, "y": 37, "width": 20, "height": 233},
+            {"id": "qzeast", "x": 172, "y": 37, "width": 20, "height": 233},
+        ]
+        table["seats"] = [
+            {"arm": "qzwest", "side": "right", "count": 3},
+            {"arm": "qzwest", "side": "left", "count": 3},
+            {"arm": "qzeast", "side": "left", "count": 3},
+        ]
+        self.assertEqual(check_table(table).errors, [])
+        self.assertEqual(label_spots(guest(table, [5], pair=NO_COUPLE)), [("47", "153.5", "start")])
+        with self.assertRaises(TableError) as caught:
+            guest(table, [5, 2], [2], pair=NO_COUPLE)
+        self.assertEqual(caught.exception.errors, ["seat 2: no room for the '+1' label"])
 
 
 # --------------------------------------------------------------------------
@@ -475,6 +517,38 @@ class BadgeTest(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 
+def row_table() -> dict:
+    """A row of 7 squeezed seats along the top edge of the field."""
+    return {
+        "label": "Row",
+        "arms": [{"id": "main", "x": 40, "y": 56, "width": 238, "height": 30}],
+        "seats": [{"arm": "main", "side": "top", "count": 7}],
+    }
+
+
+SEATS_ERROR = "couple.members[].seat: expected 1-2 different seat numbers from 1 to 16"
+LABEL_ERROR = "couple.label: expected a non-empty one-line string"
+
+#: (rule, table, check_couple arguments after the table, level, messages);
+#: the rules are those of the table description that concern the couple.
+COUPLE_CASES = [
+    (15, l_table, ([4, 17], COUPLE_LABEL, None), "error", [SEATS_ERROR]),
+    (15, l_table, ([4, 4], COUPLE_LABEL, None), "error", [SEATS_ERROR]),
+    (15, l_table, ([1, 2, 3], COUPLE_LABEL, None), "error", [SEATS_ERROR]),
+    (15, l_table, ([], COUPLE_LABEL, None), "error", [SEATS_ERROR]),
+    (15, l_table, (["4"], COUPLE_LABEL, None), "error", [SEATS_ERROR]),
+    (15, l_table, ([4, 5], COUPLE_LABEL, "middle"), "error", ["couple.arm: not an id of table.arms"]),
+    (2, l_table, ([4, 5], "", None), "error", [LABEL_ERROR]),
+    (2, l_table, ([4, 5], "Ivan\nVera", None), "error", [LABEL_ERROR]),
+    (16, l_table, ([4, 5], "Ivan Ivanovich and Vera Longname", None), "warning",
+     ["couple.label: may not fit inside the arm"]),
+    (14, row_table, ([4], COUPLE_LABEL, None), "error", [
+        "couple.label: leaves no room for the 'You' label of seat 3",
+        "couple.label: leaves no room for the 'You' label of seat 5",
+    ]),
+]
+
+
 class CoupleTest(unittest.TestCase):
     def test_couple_label_in_the_middle_of_the_free_part_of_its_arm(self):
         for make in (l_table, l_table_shifted):
@@ -498,44 +572,20 @@ class CoupleTest(unittest.TestCase):
                 check = check_couple(make(), pair["couple_seats"], pair["couple_label"], pair["couple_arm"])
                 self.assertEqual(check, TableCheck([], [], len(expand_seats(make()))))
 
-    def test_long_couple_label_may_not_fit(self):
-        check = check_couple(l_table(), [4, 5], "Ivan Ivanovich and Vera Longname", None)
-        self.assertEqual(check.errors, [])
-        self.assertEqual(check.warnings, ["couple.label: may not fit inside the arm"])
+    def test_check_couple_cases(self):
+        for rule, make, args, level, messages in COUPLE_CASES:
+            with self.subTest(rule=rule, args=args):
+                check = check_couple(make(), *args)
+                if level == "warning":
+                    self.assertEqual((check.errors, check.warnings), ([], messages))
+                else:
+                    self.assertEqual(check.errors, messages)
 
-    def test_couple_label_must_leave_room_for_the_you_labels(self):
+    def test_couple_label_on_the_only_spot_of_a_you_label(self):
         # a squeezed row at the top of the field: the only room for a label of
-        # a middle seat is on the arm, where the couple label is
-        row = {
-            "label": "Row",
-            "arms": [{"id": "main", "x": 40, "y": 56, "width": 238, "height": 30}],
-            "seats": [{"arm": "main", "side": "top", "count": 7}],
-        }
-        self.assertEqual(check_table(row).errors, [])
-        self.assertEqual(check_couple(row, [4], None, None).errors, [])
-        self.assertEqual(
-            check_couple(row, [4], COUPLE_LABEL, None).errors,
-            [
-                "couple.label: leaves no room for the 'You' label of seat 3",
-                "couple.label: leaves no room for the 'You' label of seat 5",
-            ],
-        )
-
-    def test_check_couple_errors(self):
-        seats_error = "couple.members[].seat: expected 1-2 different seat numbers from 1 to 16"
-        cases = [
-            (([4, 17], COUPLE_LABEL, None), seats_error),
-            (([4, 4], COUPLE_LABEL, None), seats_error),
-            (([1, 2, 3], COUPLE_LABEL, None), seats_error),
-            (([], COUPLE_LABEL, None), seats_error),
-            ((["4"], COUPLE_LABEL, None), seats_error),
-            (([4, 5], "", None), "couple.label: expected a non-empty one-line string"),
-            (([4, 5], "Ivan\nVera", None), "couple.label: expected a non-empty one-line string"),
-            (([4, 5], COUPLE_LABEL, "middle"), "couple.arm: not an id of table.arms"),
-        ]
-        for args, message in cases:
-            with self.subTest(args=args):
-                self.assertEqual(check_couple(l_table(), *args).errors, [message])
+        # a middle seat is on the arm, where the couple label is (COUPLE_CASES)
+        self.assertEqual(check_table(row_table()).errors, [])
+        self.assertEqual(check_couple(row_table(), [4], None, None), TableCheck([], [], 7))
 
     def test_check_couple_with_a_broken_table_checks_what_it_can(self):
         table = l_table()
@@ -644,6 +694,16 @@ RULE_CASES = [
 
 WARNING_RULES = {9}
 
+#: (rule, table, patched constants, messages): with the real constants the
+#: label of a seat can always go onto its own arm, so the rule is reached
+#: only with a wider keep-out around the other seats.
+PATCHED_RULE_CASES = [
+    (14, l_table, {"SEAT_KEEP_OUT": 40}, [
+        "table.seats[1] (seat 3): no room for the 'You' label",
+        "table.seats[5] (seat 14): no room for the 'You' label",
+    ]),
+]
+
 
 class CheckTest(unittest.TestCase):
     def test_fixtures_pass(self):
@@ -659,20 +719,26 @@ class CheckTest(unittest.TestCase):
                 self.assertIn(message, found)
                 if rule in WARNING_RULES:
                     self.assertEqual(check.errors, [])
-        covered = {rule for rule, _, _ in RULE_CASES}
-        # 14: below (with a patched constant), 15-16: check_couple (CoupleTest), 2: also there
-        self.assertEqual(covered | {14, 15, 16}, set(range(1, 18)))
 
     def test_room_for_you_is_checked_for_every_seat(self):
-        # With the real constants the label of a seat can always go onto its
-        # own arm; a wider keep-out around the other seats leaves no room.
-        with mock.patch.object(_table, "SEAT_KEEP_OUT", 40):
-            errors = check_table(l_table()).errors
-        self.assertIn("table.seats[1] (seat 3): no room for the 'You' label", errors)
-        self.assertIn("table.seats[5] (seat 14): no room for the 'You' label", errors)
+        for rule, make, constants, messages in PATCHED_RULE_CASES:
+            with self.subTest(rule=rule, constants=constants):
+                with mock.patch.multiple(_table, **constants):
+                    errors = check_table(make()).errors
+                for message in messages:
+                    self.assertIn(message, errors)
+        self.assertEqual(check_table(l_table()).errors, [])
+
+    def test_the_cases_cover_all_17_rules(self):
+        covered = (
+            {rule for rule, _, _ in RULE_CASES}
+            | {rule for rule, *_ in COUPLE_CASES}
+            | {rule for rule, *_ in PATCHED_RULE_CASES}
+        )
+        self.assertEqual(covered, set(range(1, 18)))
 
     def test_one_line_label_rejects_any_line_break(self):
-        for label in ("Table\r", "Table plan", " ", 7, None):
+        for label in ("Table\r", "Table" + chr(0x2028) + "plan", " ", 7, None):
             with self.subTest(label=label):
                 table = l_table()
                 table["label"] = label
@@ -700,7 +766,9 @@ def secret_table() -> dict:
     }
 
 
-SECRET_NUMBERS = {"57", "131", "203", "51", "260", "182", "777", "157", "77", "33", "130", "19", "43", "253"}
+SECRET_NUMBERS = {
+    "57", "131", "203", "51", "260", "182", "13", "777", "157", "77", "33", "130", "19", "43", "253",
+}
 
 SECRET_CHANGES = [
     set_item(["qzfield"], 1),

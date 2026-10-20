@@ -25,7 +25,7 @@ Public functions: `check_table`, `check_couple`, `expand_seats`,
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, NamedTuple
 
 # --------------------------------------------------------------------------
@@ -171,13 +171,19 @@ class _Plan(NamedTuple):
     outline: str
 
 
+#: A box in half px: x0, y0, x1, y1.
+_Box = tuple[int, int, int, int]
+#: A label spot: its box, the text position (half px) and the text anchor.
+_Spot = tuple[_Box, int, int, str]
+
+
 class _Caption(NamedTuple):
     text: str
     x: int  # half px
     y: int  # half px
     vertical: bool
     fits: bool
-    box: tuple
+    box: _Box
 
 
 # --------------------------------------------------------------------------
@@ -460,7 +466,7 @@ def _place(specs: Sequence[tuple], arms: Sequence[_Arm]) -> list[_Seat]:
     return [centres[number] for number in range(1, len(specs) + 1)]
 
 
-def _distance2_to_box(cx: int, cy: int, box: tuple[int, int, int, int]) -> int:
+def _distance2_to_box(cx: int, cy: int, box: _Box) -> int:
     """The squared distance from a point to a box (all in the same units)."""
     x0, y0, x1, y1 = box
     dx = max(x0 - cx, 0, cx - x1)
@@ -468,7 +474,7 @@ def _distance2_to_box(cx: int, cy: int, box: tuple[int, int, int, int]) -> int:
     return dx * dx + dy * dy
 
 
-def _arm_box(arm: _Arm) -> tuple[int, int, int, int]:
+def _arm_box(arm: _Arm) -> _Box:
     """The arm in half px."""
     return 2 * arm.x0, 2 * arm.y0, 2 * arm.x1, 2 * arm.y1
 
@@ -593,6 +599,8 @@ def check_table(table: Any) -> TableCheck:
 
 
 def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
+    """The rules in waves: structure, arms, sides, seats, labels; a wave runs
+    only when the ones before it found no error."""
     errors: list[str] = []
     warnings: list[str] = []
     parsed = _parse(table, errors)
@@ -600,6 +608,29 @@ def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
     if errors:
         return TableCheck(errors, warnings, total), None
     arms = parsed.arms
+    errors = _check_arms(arms)
+    if not errors:
+        errors = _check_sides(parsed.specs, arms, warnings)
+    if errors:
+        return TableCheck(errors, warnings, total), None
+    seats = _place(parsed.specs, arms)
+    errors = _check_seats(seats, arms)
+    if errors:
+        return TableCheck(errors, warnings, total), None
+
+    plan = _Plan(parsed.label, arms, parsed.ids, seats, _outline(arms))
+    # Any seat can be a seat of a guest, so every seat needs room for "You".
+    # With the constants above the label of a seat always fits onto its own
+    # arm; the check guards the layout against a change of the constants.
+    for seat in seats:
+        if _label_spot(seat, plan, {seat.number}, [], None) is None:
+            errors.append(f"{_seat_where(seat)}: no room for the 'You' label")
+    return TableCheck(errors, warnings, total), (None if errors else plan)
+
+
+def _check_arms(arms: Sequence[_Arm]) -> list[str]:
+    """An arm inside another one; arms that meet only at a corner."""
+    errors = []
     for a in arms:
         for b in arms:
             if a.index == b.index:
@@ -609,11 +640,14 @@ def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
             if inside and (not same or a.index > b.index):
                 errors.append(f"table.arms[{a.index}]: lies inside table.arms[{b.index}]")
     errors.extend(_corner_touches(arms))
-    if errors:
-        return TableCheck(errors, warnings, total), None
+    return errors
 
+
+def _check_sides(specs: Sequence[tuple], arms: Sequence[_Arm], warnings: list[str]) -> list[str]:
+    """One free part per side, room for its seats; a squeezed pitch is a warning."""
+    errors = []
     by_id = {arm.id: arm for arm in arms}
-    for (arm_id, side), numbers in _groups(parsed.specs).items():
+    for (arm_id, side), numbers in _groups(specs).items():
         arm = by_id[arm_id]
         where = f"table.arms[{arm.index}] side '{side}'"
         listed = _numbers_text(numbers)
@@ -633,10 +667,12 @@ def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
                 )
             elif _pitch(count, b - a) < 2 * SEAT_PITCH:
                 warnings.append(f"{where}: {listed} squeezed closer than {SEAT_PITCH} px")
-    if errors:
-        return TableCheck(errors, warnings, total), None
+    return errors
 
-    seats = _place(parsed.specs, arms)
+
+def _check_seats(seats: Sequence[_Seat], arms: Sequence[_Arm]) -> list[str]:
+    """Each seat in the field, on its side, clear of the arms and of the other seats."""
+    errors = []
     edge = YOU_DIAMETER  # half px: the radius of a guest seat
     reach = YOU_DIAMETER + 2 * ARM_GAP  # half px
     for seat in seats:
@@ -656,17 +692,7 @@ def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
         for t in seats[k + 1:]:
             if (s.cx - t.cx) ** 2 + (s.cy - t.cy) ** 2 < least * least:
                 errors.append(f"seats {s.number} and {t.number}: closer than {SEAT_PITCH_MIN} px")
-    if errors:
-        return TableCheck(errors, warnings, total), None
-
-    plan = _Plan(parsed.label, arms, parsed.ids, seats, _outline(arms))
-    # Any seat can be a seat of a guest, so every seat needs room for "You".
-    # With the constants above the label of a seat always fits onto its own
-    # arm; the check guards the layout against a change of the constants.
-    for seat in seats:
-        if _label_spot(seat, plan, {seat.number}, [], None) is None:
-            errors.append(f"{_seat_where(seat)}: no room for the 'You' label")
-    return TableCheck(errors, warnings, total), (None if errors else plan)
+    return errors
 
 
 def _checked(table: Any) -> _Plan:
@@ -766,11 +792,11 @@ def _caption(plan: _Plan, couple_seats: Sequence[int], label: str, arm_id: str |
 # --------------------------------------------------------------------------
 
 
-def _overlap(a: tuple, b: tuple) -> bool:
+def _overlap(a: _Box, b: _Box) -> bool:
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
-def _label_candidates(seat: _Seat):
+def _label_candidates(seat: _Seat) -> Iterator[_Spot]:
     """(box, text x, text y, anchor) in half px: outwards from the table
     first, then right, left, up, down."""
     outward = _OUTWARD[seat.side]
@@ -790,14 +816,22 @@ def _label_candidates(seat: _Seat):
 
 
 def _label_spot(
-    seat: _Seat, plan: _Plan, own: set, taken: Sequence[tuple], caption_box: tuple | None
-):
+    seat: _Seat, plan: _Plan, own: set, taken: Sequence[_Box], caption_box: _Box | None
+) -> _Spot | None:
     """The first label spot inside the field that hits no other seat, label
     or the couple label; the arms are avoided when possible (first pass),
-    else a label may lie on an arm.  None when there is no room."""
+    else a label may lie on an arm.  None when there is no room.
+
+    A label keeps off the ring of another seat of the guest; as a last resort
+    (third pass) it keeps off that seat only as far as off any other seat:
+    this frees the spot on a narrow arm right between two seats of the guest.
+    """
     blocked = list(taken) + ([caption_box] if caption_box else [])
     arm_boxes = [_arm_box(arm) for arm in plan.arms]
-    for avoid_arms in (True, False):
+    passes = [(True, RING_RADIUS), (False, RING_RADIUS)]
+    if len(own) > 1:
+        passes.append((False, SEAT_KEEP_OUT))
+    for avoid_arms, own_keep_out in passes:
         for box, x, y, anchor in _label_candidates(seat):
             if box[0] < 0 or box[1] < 0 or box[2] > 2 * FIELD_WIDTH or box[3] > 2 * FIELD_HEIGHT:
                 continue
@@ -807,7 +841,7 @@ def _label_spot(
                 continue
             if any(
                 _distance2_to_box(t.cx, t.cy, box)
-                < (2 * (RING_RADIUS if t.number in own else SEAT_KEEP_OUT)) ** 2
+                < (2 * (own_keep_out if t.number in own else SEAT_KEEP_OUT)) ** 2
                 for t in plan.seats
                 if t.number != seat.number
             ):
@@ -864,6 +898,15 @@ def guest_scheme(
     gets "You" and "+1" labels only with one or two seats; there are no
     badges and no dietary marks.  `mine_text` ("8 and 9") is worded by the
     caller.
+
+    Raises TableError when the table does not pass `check_table` or the
+    parameters contradict it.  `check_table` makes sure that one label fits
+    at any seat; with two seats of the guest the second label must also
+    keep off the first one, so in a very crowded spot the labels of a
+    two-seat record may still find no room: then TableError names only the
+    seat numbers ("seat 5: no room for the '+1' label").  The usual case of
+    it, two seats right across a narrow arm at the edge of the field, is
+    handled: the label goes onto the arm between them.
     """
     plan = _checked(table)
     total = len(plan.seats)
@@ -881,7 +924,7 @@ def guest_scheme(
     seats = _seat_entries(plan, own=set(own), couple=set(couple), flagged=set())
     labels = []
     if len(own) <= 2:
-        taken: list[tuple] = []
+        taken: list[_Box] = []
         for position, number in enumerate(own):
             is_you, is_plus_one = position == 0, number in plus_one
             if not is_you and not is_plus_one:

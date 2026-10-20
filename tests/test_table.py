@@ -1,0 +1,928 @@
+"""Tests of the table plan geometry (`menu_tools._table`), standard library only.
+
+The fixtures are fictional.  The L-shaped table is the one of the design
+mockup; its seat centres with the per-side shifts are the centres of the
+mockup to the pixel.
+"""
+
+import ast
+import copy
+import hashlib
+import inspect
+import json
+import re
+import sys
+import unittest
+from fractions import Fraction
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from menu_tools import _table  # noqa: E402  (imported after sys.path is prepared)
+from menu_tools._table import (  # noqa: E402
+    TableCheck,
+    TableError,
+    badge_capacity,
+    check_couple,
+    check_table,
+    expand_seats,
+    guest_scheme,
+    staff_scheme,
+)
+
+MODULE = ROOT / "menu_tools" / "_table.py"
+
+COUPLE_LABEL = "Ivan · Vera"
+COUPLE_TEXT = "IVAN · VERA"
+
+
+# --------------------------------------------------------------------------
+# Fixtures
+# --------------------------------------------------------------------------
+
+
+def l_table() -> dict:
+    """The L-shaped table of the mockup on 16 seats, automatic layout."""
+    return {
+        "label": "L-shaped table",
+        "arms": [
+            {"id": "top", "x": 40, "y": 60, "width": 200, "height": 52},
+            {"id": "right", "x": 188, "y": 60, "width": 52, "height": 200},
+        ],
+        "seats": [
+            {"arm": "top", "side": "left"},                  # 1
+            {"arm": "top", "side": "top", "count": 5},       # 2-6
+            {"arm": "right", "side": "right", "count": 4},   # 7-10
+            {"arm": "right", "side": "bottom"},              # 11
+            {"arm": "right", "side": "left", "count": 2},    # 12-13
+            {"arm": "top", "side": "bottom", "count": 3},    # 14-16
+        ],
+    }
+
+
+def l_table_shifted() -> dict:
+    """The same table with the side shifts that reproduce the mockup."""
+    table = l_table()
+    table["arms"][0]["shift"] = {"top": 10, "bottom": 5}
+    table["arms"][1]["shift"] = {"right": 3, "left": -6}
+    return table
+
+
+def straight_table() -> dict:
+    """A straight table on 12 seats: 5 + 5 on the long sides, one at each end."""
+    return {
+        "label": "Straight table",
+        "arms": [{"id": "main", "x": 54, "y": 129, "width": 210, "height": 52}],
+        "seats": [
+            {"arm": "main", "side": "left"},
+            {"arm": "main", "side": "top", "count": 5},
+            {"arm": "main", "side": "right"},
+            {"arm": "main", "side": "bottom", "count": 5},
+        ],
+    }
+
+
+def u_table() -> dict:
+    """A U-shaped table on 20 seats, open to the top."""
+    return {
+        "label": "U-shaped table",
+        "arms": [
+            {"id": "west", "x": 40, "y": 40, "width": 52, "height": 210},
+            {"id": "base", "x": 40, "y": 198, "width": 238, "height": 52},
+            {"id": "east", "x": 226, "y": 40, "width": 52, "height": 210},
+        ],
+        "seats": [
+            {"arm": "west", "side": "top"},                  # 1
+            {"arm": "west", "side": "right", "count": 2},    # 2-3
+            {"arm": "base", "side": "top"},                  # 4
+            {"arm": "east", "side": "left", "count": 2},     # 5-6
+            {"arm": "east", "side": "top"},                  # 7
+            {"arm": "east", "side": "right", "count": 4},    # 8-11
+            {"arm": "base", "side": "bottom", "count": 5},   # 12-16
+            {"arm": "west", "side": "left", "count": 4},     # 17-20
+        ],
+    }
+
+
+def two_tables() -> dict:
+    """Two separate tables on 8 seats each, numbered through."""
+    seats = []
+    for arm in ("first", "second"):
+        seats += [
+            {"arm": arm, "side": "left"},
+            {"arm": arm, "side": "top", "count": 3},
+            {"arm": arm, "side": "right"},
+            {"arm": arm, "side": "bottom", "count": 3},
+        ]
+    return {
+        "label": "Two tables",
+        "arms": [
+            {"id": "first", "x": 91, "y": 40, "width": 136, "height": 48},
+            {"id": "second", "x": 91, "y": 200, "width": 136, "height": 48},
+        ],
+        "seats": seats,
+    }
+
+
+def couple(seats=(4, 5), label=COUPLE_LABEL, arm=None) -> dict:
+    return {"couple_seats": list(seats), "couple_label": label, "couple_arm": arm}
+
+
+NO_COUPLE = couple((), None)
+
+#: fixture -> (table, couple, guest seats (the second one is a +1), staff letters)
+FIXTURES = {
+    "l-auto": (l_table, couple(), [8, 9], {1: ["A"], 3: ["N"], 7: ["V"], 10: ["G", "L"], 12: ["N", "V"]}),
+    "l-shifted": (l_table_shifted, couple(), [8, 9], {1: ["A"], 10: ["G", "L"], 14: ["L"]}),
+    "straight": (straight_table, couple((4, 10)), [7, 8], {2: ["N"], 7: ["G", "V"], 12: ["A"]}),
+    "u": (u_table, couple((14, 15), arm="base"), [11, 12], {1: ["N"], 8: ["G", "L"], 20: ["A", "N"]}),
+    "two": (two_tables, couple((3, 7)), [12, 13], {1: ["A"], 5: ["N", "G"], 14: ["V"]}),
+}
+
+#: Seat centres of the mockup (px).
+MOCKUP_CENTRES = {
+    1: (18, 86), 2: (66, 38), 3: (108, 38), 4: (150, 38), 5: (192, 38), 6: (234, 38),
+    7: (262, 100), 8: (262, 142), 9: (262, 184), 10: (262, 226), 11: (214, 282),
+    12: (166, 212), 13: (166, 170), 14: (150, 134), 15: (108, 134), 16: (66, 134),
+}
+
+#: The automatic layout of the L-shaped table against the mockup (px): the
+#: mockup was placed by hand and follows no single rule; the ends match.
+AUTO_DEVIATIONS = {
+    **{n: (-10, 0) for n in range(2, 7)},
+    **{n: (0, -3) for n in range(7, 11)},
+    12: (0, 6), 13: (0, 6),
+    **{n: (-5, 0) for n in range(14, 17)},
+}
+
+OUTLINES = {
+    "l-auto": (
+        "M50 60L230 60A10 10 0 0 1 240 70L240 250A10 10 0 0 1 230 260L198 260"
+        "A10 10 0 0 1 188 250L188 112L50 112A10 10 0 0 1 40 102L40 70A10 10 0 0 1 50 60Z"
+    ),
+    "straight": (
+        "M64 129L254 129A10 10 0 0 1 264 139L264 171A10 10 0 0 1 254 181L64 181"
+        "A10 10 0 0 1 54 171L54 139A10 10 0 0 1 64 129Z"
+    ),
+    "u": (
+        "M50 40L82 40A10 10 0 0 1 92 50L92 198L226 198L226 50A10 10 0 0 1 236 40L268 40"
+        "A10 10 0 0 1 278 50L278 240A10 10 0 0 1 268 250L50 250A10 10 0 0 1 40 240"
+        "L40 50A10 10 0 0 1 50 40Z"
+    ),
+    "two": (
+        "M101 40L217 40A10 10 0 0 1 227 50L227 78A10 10 0 0 1 217 88L101 88"
+        "A10 10 0 0 1 91 78L91 50A10 10 0 0 1 101 40Z"
+        "M101 200L217 200A10 10 0 0 1 227 210L227 238A10 10 0 0 1 217 248L101 248"
+        "A10 10 0 0 1 91 238L91 210A10 10 0 0 1 101 200Z"
+    ),
+}
+
+#: sha256 of the guest and staff objects of all FIXTURES (JSON, sorted keys).
+DIGEST = "fec4a5c7a8828e8da7c9d3ccf8117f40199fa3ae40b05d30548cac1e17d70b70"
+
+
+def guest(table, own, plus_one=(), *, pair=None, mine="mine") -> dict:
+    return guest_scheme(
+        table,
+        own_seats=list(own),
+        plus_one_seats=list(plus_one),
+        mine_text=mine,
+        **(couple() if pair is None else pair),
+    )
+
+
+def staff(table, letters, *, pair=None) -> dict:
+    return staff_scheme(table, letters=letters, **(couple() if pair is None else pair))
+
+
+def fixture_objects(name: str) -> tuple[dict, dict]:
+    make, pair, own, letters = FIXTURES[name]
+    mine = " and ".join(map(str, own))
+    return (
+        guest(make(), own, own[1:], pair=pair, mine=mine),
+        staff(make(), letters, pair=pair),
+    )
+
+
+def centres(scheme: dict) -> dict[int, tuple[str, str]]:
+    return {int(seat["number"]): (seat["cx"], seat["cy"]) for seat in scheme["seats"]}
+
+
+def px(value) -> str:
+    return str(value)
+
+
+def expanded(table: dict) -> dict:
+    """The same table with one item per seat (no `count`)."""
+    copy_ = copy.deepcopy(table)
+    copy_["seats"] = [
+        {"arm": item["arm"], "side": item["side"]}
+        for item in table["seats"]
+        for _ in range(item.get("count", 1))
+    ]
+    return copy_
+
+
+# --------------------------------------------------------------------------
+# Layout
+# --------------------------------------------------------------------------
+
+
+class LayoutTest(unittest.TestCase):
+    def test_shifted_l_table_matches_the_mockup(self):
+        expected = {n: (px(x), px(y)) for n, (x, y) in MOCKUP_CENTRES.items()}
+        self.assertEqual(centres(guest(l_table_shifted(), [8])), expected)
+
+    def test_automatic_l_table_has_the_documented_deviations(self):
+        expected = {}
+        for n, (x, y) in MOCKUP_CENTRES.items():
+            dx, dy = AUTO_DEVIATIONS.get(n, (0, 0))
+            expected[n] = (px(x + dx), px(y + dy))
+        self.assertEqual(centres(guest(l_table(), [8])), expected)
+
+    def test_end_seats_sit_at_the_middle_of_the_ends(self):
+        for make in (l_table, l_table_shifted):
+            with self.subTest(table=make.__name__):
+                found = centres(guest(make(), [8]))
+                self.assertEqual(found[1], ("18", "86"))
+                self.assertEqual(found[11], ("214", "282"))
+
+    def test_seats_go_clockwise_on_every_side(self):
+        found = {n: tuple(map(Fraction, centre)) for n, centre in centres(guest(l_table(), [8])).items()}
+        self.assertLess(found[2][0], found[6][0])        # top: left to right
+        self.assertLess(found[7][1], found[10][1])       # right: downwards
+        self.assertGreater(found[12][1], found[13][1])   # left: upwards
+        self.assertGreater(found[14][0], found[16][0])   # bottom: right to left
+
+    def test_expand_seats_lists_arm_and_side_by_number(self):
+        self.assertEqual(
+            expand_seats(l_table()),
+            [("top", "left")] + [("top", "top")] * 5 + [("right", "right")] * 4
+            + [("right", "bottom")] + [("right", "left")] * 2 + [("top", "bottom")] * 3,
+        )
+
+    def test_count_and_the_expanded_list_give_the_same_result(self):
+        for name, (make, pair, own, letters) in FIXTURES.items():
+            with self.subTest(fixture=name):
+                table = make()
+                self.assertEqual(expand_seats(table), expand_seats(expanded(table)))
+                self.assertEqual(
+                    guest(table, own, own[1:], pair=pair), guest(expanded(table), own, own[1:], pair=pair)
+                )
+                self.assertEqual(staff(table, letters, pair=pair), staff(expanded(table), letters, pair=pair))
+
+    def test_free_part_of_a_side_steps_back_from_a_neighbour_arm(self):
+        table = l_table()
+        table["seats"] = [{"arm": "top", "side": "bottom"}, {"arm": "right", "side": "left"}]
+        found = centres(guest(table, [1], pair=NO_COUPLE))
+        # top arm, bottom side: 40 ... 188 - 22; right arm, left side: 112 + 22 ... 260
+        self.assertEqual(found[1], ("103", "134"))
+        self.assertEqual(found[2], ("166", "197"))
+
+    def test_side_covered_by_another_arm_is_an_error(self):
+        table = {
+            "label": "T-shaped table",
+            "arms": [
+                {"id": "stem", "x": 100, "y": 40, "width": 60, "height": 60},
+                {"id": "bar", "x": 60, "y": 80, "width": 160, "height": 50},
+            ],
+            "seats": [{"arm": "bar", "side": "bottom"}, {"arm": "stem", "side": "bottom"}],
+        }
+        self.assertEqual(
+            check_table(table).errors,
+            ["table.arms[0] side 'bottom': covered by another arm, no room for seat 2"],
+        )
+
+    def test_side_split_in_two_by_another_arm_is_an_error(self):
+        table = {
+            "label": "Table with a leg",
+            "arms": [
+                {"id": "long", "x": 40, "y": 100, "width": 240, "height": 50},
+                {"id": "leg", "x": 140, "y": 130, "width": 40, "height": 100},
+            ],
+            "seats": [{"arm": "long", "side": "bottom", "count": 2}],
+        }
+        self.assertEqual(
+            check_table(table).errors,
+            ["table.arms[0] side 'bottom': split in two by another arm; make two arms of it (seats 1, 2)"],
+        )
+
+    def test_pitch_is_42_while_the_seats_fit_and_squeezed_down_to_34(self):
+        def row(width, count):
+            table = {
+                "label": "Row",
+                "arms": [{"id": "main", "x": 59, "y": 129, "width": width, "height": 52}],
+                "seats": [{"arm": "main", "side": "top", "count": count}],
+            }
+            check = check_table(table)
+            xs = [centre[0] for _, centre in sorted(centres(guest(table, [1], pair=NO_COUPLE)).items())]
+            return check, xs
+
+        check, xs = row(200, 5)
+        self.assertEqual((check.errors, check.warnings), ([], []))
+        self.assertEqual(xs, ["75", "117", "159", "201", "243"])
+        check, xs = row(200, 6)
+        self.assertEqual(check.errors, [])
+        self.assertEqual(check.warnings, ["table.arms[0] side 'top': seats 1-6 squeezed closer than 42 px"])
+        self.assertEqual(xs, ["74", "108", "142", "176", "210", "244"])
+        check, xs = row(203, 6)  # a pitch of 34.5 px
+        self.assertEqual(xs, ["74", "108.5", "143", "177.5", "212", "246.5"])
+
+    def test_seven_seats_on_a_side_of_200_px_is_an_error(self):
+        table = l_table()
+        table["seats"][1]["count"] = 7
+        self.assertEqual(
+            check_table(table).errors,
+            ["table.arms[0] side 'top': too short for seats 2-8: 7 seat(s) need 234 px of free length"],
+        )
+
+
+# --------------------------------------------------------------------------
+# Outline
+# --------------------------------------------------------------------------
+
+
+class OutlineTest(unittest.TestCase):
+    def test_outlines_of_the_shapes(self):
+        for name, expected in OUTLINES.items():
+            with self.subTest(shape=name):
+                guest_object, staff_object = fixture_objects(name)
+                self.assertEqual(guest_object["outline"], expected)
+                self.assertEqual(staff_object["outline"], expected)
+
+    def test_short_edges_get_a_smaller_radius_in_half_pixels(self):
+        table = {
+            "label": "Stepped table",
+            "arms": [
+                {"id": "top", "x": 40, "y": 60, "width": 200, "height": 52},
+                {"id": "right", "x": 188, "y": 65, "width": 57, "height": 195},
+            ],
+            "seats": [{"arm": "top", "side": "top", "count": 3}, {"arm": "right", "side": "right", "count": 2}],
+        }
+        self.assertEqual(
+            staff(table, {}, pair=NO_COUPLE)["outline"],
+            "M50 60L237.5 60A2.5 2.5 0 0 1 240 62.5L240 65L242.5 65A2.5 2.5 0 0 1 245 67.5"
+            "L245 250A10 10 0 0 1 235 260L198 260A10 10 0 0 1 188 250L188 112L50 112"
+            "A10 10 0 0 1 40 102L40 70A10 10 0 0 1 50 60Z",
+        )
+
+
+# --------------------------------------------------------------------------
+# Labels "You" and "+1"
+# --------------------------------------------------------------------------
+
+
+def label_spots(scheme: dict) -> list[tuple[str, str, str]]:
+    return [(label["x"], label["y"], label["anchor"]) for label in scheme["labels"]]
+
+
+class LabelTest(unittest.TestCase):
+    def test_you_and_plus_one_next_to_seats_8_and_9_as_in_the_mockup(self):
+        scheme = guest(l_table_shifted(), [8, 9], [9])
+        self.assertEqual(
+            scheme["labels"],
+            [
+                {"isYou": True, "isPlusOne": False, "x": "283", "y": "142", "anchor": "start"},
+                {"isYou": False, "isPlusOne": True, "x": "283", "y": "184", "anchor": "start"},
+            ],
+        )
+
+    def test_labels_fall_back_at_the_edge_of_the_field(self):
+        # seat 1: outwards (left) is out of the field, right lies on the arm
+        self.assertEqual(label_spots(guest(l_table(), [1])), [("18", "58", "middle")])
+        # seat 11: outwards (down) is out of the field
+        self.assertEqual(label_spots(guest(l_table(), [11])), [("235", "282", "start")])
+
+    def test_label_at_the_inner_corner_may_lie_on_an_arm(self):
+        # seat 14: below is seat 13, left is seat 15; the label goes onto the right arm
+        self.assertEqual(label_spots(guest(l_table(), [14])), [("166", "134", "start")])
+
+    def test_every_seat_of_the_l_table_has_room_for_you(self):
+        for make in (l_table, l_table_shifted):
+            for number in range(1, 17):
+                with self.subTest(table=make.__name__, seat=number):
+                    pair = couple((), arm="top") if number in (4, 5) else couple()
+                    labels = guest(make(), [number], pair=pair)["labels"]
+                    self.assertEqual(len(labels), 1)
+                    self.assertTrue(labels[0]["isYou"])
+
+    def test_more_than_two_own_seats_get_no_labels(self):
+        scheme = guest(l_table(), [8, 9, 10], [9])
+        self.assertEqual(scheme["labels"], [])
+        self.assertEqual([s["kind"] for s in scheme["seats"]].count("you"), 3)
+
+    def test_a_second_seat_without_plus_one_gets_no_label(self):
+        scheme = guest(l_table(), [8, 9])
+        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in scheme["labels"]], [(True, False)])
+        self.assertFalse(scheme["single"])
+
+
+# --------------------------------------------------------------------------
+# Badges
+# --------------------------------------------------------------------------
+
+
+def badge_spots(scheme: dict) -> list[tuple[str, str]]:
+    return [(badge["cx"], badge["cy"]) for badge in scheme["badges"]]
+
+
+class BadgeTest(unittest.TestCase):
+    def test_one_badge_at_the_top_right_as_in_the_mockup(self):
+        scheme = staff(l_table_shifted(), {1: ["A"]})
+        self.assertEqual(scheme["badges"], [{"letter": "A", "cx": "30", "cy": "74", "r": "9"}])
+
+    def test_one_to_four_badges(self):
+        expected = {
+            1: [("274", "130")],
+            2: [("250", "130"), ("274", "130")],
+            3: [("250", "130"), ("274", "130"), ("274", "154")],
+            4: [("250", "130"), ("274", "130"), ("250", "154"), ("274", "154")],
+        }
+        for count, spots in expected.items():
+            with self.subTest(count=count):
+                letters = list("ABCD"[:count])
+                scheme = staff(l_table_shifted(), {8: letters})
+                self.assertEqual(badge_spots(scheme), spots)
+                self.assertEqual([badge["letter"] for badge in scheme["badges"]], letters)
+
+    def test_two_badges_at_seat_10_sit_above_it(self):
+        scheme = staff(l_table(), {10: ["G", "L"]})
+        self.assertEqual(badge_spots(scheme), [("250", "211"), ("274", "211")])
+
+    def test_badge_capacity_is_smaller_at_the_edge_of_the_field(self):
+        self.assertEqual([badge_capacity(l_table(), n) for n in range(1, 17)], [2] + [4] * 15)
+        self.assertEqual(
+            [badge_capacity(u_table(), n) for n in range(1, 21)],
+            [2, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 2, 2, 2, 2],
+        )
+        # seat 1 of the L table: the left spots are outside the field
+        self.assertEqual(badge_spots(staff(l_table(), {1: ["A", "B"]})), [("30", "74"), ("30", "98")])
+
+    def test_more_badges_than_room_is_an_error(self):
+        with self.assertRaises(TableError) as caught:
+            staff(l_table(), {1: ["A", "B", "C"]})
+        self.assertEqual(caught.exception.errors, ["seat 1: no room for 3 badges"])
+        with self.assertRaises(TableError) as caught:
+            staff(l_table(), {8: list("ABCDE")})
+        self.assertEqual(caught.exception.errors, ["seat 8: no room for 5 badges"])
+
+
+# --------------------------------------------------------------------------
+# The couple
+# --------------------------------------------------------------------------
+
+
+class CoupleTest(unittest.TestCase):
+    def test_couple_label_in_the_middle_of_the_free_part_of_its_arm(self):
+        for make in (l_table, l_table_shifted):
+            with self.subTest(table=make.__name__):
+                self.assertEqual(
+                    guest(make(), [8])["couple"], {"text": COUPLE_TEXT, "x": "114", "y": "86", "vertical": False}
+                )
+
+    def test_couple_label_on_a_vertical_arm(self):
+        scheme = staff(l_table(), {}, pair=couple(arm="right"))
+        self.assertEqual(scheme["couple"], {"text": COUPLE_TEXT, "x": "214", "y": "186", "vertical": True})
+
+    def test_no_couple_label_without_a_label(self):
+        scheme = guest(l_table(), [8], pair=couple(label=None))
+        self.assertIsNone(scheme["couple"])
+        self.assertEqual([s["kind"] for s in scheme["seats"]].count("couple"), 2)
+
+    def test_check_couple_accepts_the_fixtures(self):
+        for name, (make, pair, _own, _letters) in FIXTURES.items():
+            with self.subTest(fixture=name):
+                check = check_couple(make(), pair["couple_seats"], pair["couple_label"], pair["couple_arm"])
+                self.assertEqual(check, TableCheck([], [], len(expand_seats(make()))))
+
+    def test_long_couple_label_may_not_fit(self):
+        check = check_couple(l_table(), [4, 5], "Ivan Ivanovich and Vera Longname", None)
+        self.assertEqual(check.errors, [])
+        self.assertEqual(check.warnings, ["couple.label: may not fit inside the arm"])
+
+    def test_couple_label_must_leave_room_for_the_you_labels(self):
+        # a squeezed row at the top of the field: the only room for a label of
+        # a middle seat is on the arm, where the couple label is
+        row = {
+            "label": "Row",
+            "arms": [{"id": "main", "x": 40, "y": 56, "width": 238, "height": 30}],
+            "seats": [{"arm": "main", "side": "top", "count": 7}],
+        }
+        self.assertEqual(check_table(row).errors, [])
+        self.assertEqual(check_couple(row, [4], None, None).errors, [])
+        self.assertEqual(
+            check_couple(row, [4], COUPLE_LABEL, None).errors,
+            [
+                "couple.label: leaves no room for the 'You' label of seat 3",
+                "couple.label: leaves no room for the 'You' label of seat 5",
+            ],
+        )
+
+    def test_check_couple_errors(self):
+        seats_error = "couple.members[].seat: expected 1-2 different seat numbers from 1 to 16"
+        cases = [
+            (([4, 17], COUPLE_LABEL, None), seats_error),
+            (([4, 4], COUPLE_LABEL, None), seats_error),
+            (([1, 2, 3], COUPLE_LABEL, None), seats_error),
+            (([], COUPLE_LABEL, None), seats_error),
+            ((["4"], COUPLE_LABEL, None), seats_error),
+            (([4, 5], "", None), "couple.label: expected a non-empty one-line string"),
+            (([4, 5], "Ivan\nVera", None), "couple.label: expected a non-empty one-line string"),
+            (([4, 5], COUPLE_LABEL, "middle"), "couple.arm: not an id of table.arms"),
+        ]
+        for args, message in cases:
+            with self.subTest(args=args):
+                self.assertEqual(check_couple(l_table(), *args).errors, [message])
+
+    def test_check_couple_with_a_broken_table_checks_what_it_can(self):
+        table = l_table()
+        table["arms"][0]["width"] = "wide"
+        # the seats are counted, the arms are not known: the arm is not checked
+        self.assertEqual(
+            check_couple(table, [4, 17], COUPLE_LABEL, "middle"),
+            TableCheck(["couple.members[].seat: expected 1-2 different seat numbers from 1 to 16"], [], 16),
+        )
+        self.assertEqual(
+            check_couple("table", [1, 2, 3], COUPLE_LABEL, None).errors,
+            ["couple.members[].seat: expected 1-2 different seat numbers"],
+        )
+
+
+# --------------------------------------------------------------------------
+# The check of a table description: every rule
+# --------------------------------------------------------------------------
+
+
+def changed(make, change):
+    def build():
+        table = make()
+        change(table)
+        return table
+    return build
+
+
+def set_item(path, value):
+    def change(table):
+        target = table
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+    return change
+
+
+def close_tables() -> dict:
+    return {
+        "label": "Two tables close together",
+        "arms": [
+            {"id": "first", "x": 91, "y": 40, "width": 136, "height": 48},
+            {"id": "second", "x": 91, "y": 125, "width": 136, "height": 48},
+        ],
+        "seats": [{"arm": "first", "side": "bottom", "count": 3}, {"arm": "second", "side": "bottom", "count": 3}],
+    }
+
+
+#: (rule, table, message); the rules are those of the table description.
+RULE_CASES = [
+    (1, lambda: [], "table: expected an object"),
+    (1, changed(l_table, set_item(["couple"], {"seats": [4, 5]})),
+     "table: unknown field (allowed: arms, label, seats)"),
+    (1, changed(l_table, set_item(["arms", 1, "radius"], 4)),
+     "table.arms[1]: unknown field (allowed: height, id, shift, width, x, y)"),
+    (1, changed(l_table, set_item(["seats", 3, "number"], 11)),
+     "table.seats[3] (seat 11): unknown field (allowed: arm, count, side)"),
+    (2, changed(l_table, set_item(["label"], "")), "table.label: expected a non-empty one-line string"),
+    (2, changed(l_table, set_item(["label"], "Two\nlines")), "table.label: expected a non-empty one-line string"),
+    (3, changed(l_table, set_item(["arms"], [])), "table.arms: expected a non-empty array"),
+    (3, changed(l_table, set_item(["arms", 0], "top")), "table.arms[0]: expected an object"),
+    (3, changed(l_table, set_item(["arms", 0, "id"], "Top")),
+     "table.arms[0].id: expected an id: a-z, 0-9 and '-', starting with a letter, at most 40 characters"),
+    (3, changed(l_table, set_item(["arms", 1, "id"], "top")), "table.arms[1].id: repeats table.arms[0].id"),
+    (3, changed(l_table, set_item(["arms", 0, "x"], 40.5)), "table.arms[0].x: expected an integer (px)"),
+    (3, changed(l_table, set_item(["arms", 0, "height"], True)), "table.arms[0].height: expected an integer (px)"),
+    (3, changed(l_table, set_item(["arms", 1, "width"], 19)), "table.arms[1].width: expected at least 20 px"),
+    (3, changed(l_table, set_item(["arms", 0, "shift"], {"top": 43})),
+     "table.arms[0].shift.top: expected an integer from -42 to 42"),
+    (3, changed(l_table, set_item(["arms", 0, "shift"], {"middle": 1})),
+     "table.arms[0].shift: unknown side (allowed: top, right, bottom, left)"),
+    (3, changed(l_table, set_item(["arms", 0, "shift"], [10])),
+     "table.arms[0].shift: expected an object with sides as keys"),
+    (4, changed(l_table, set_item(["arms", 1, "height"], 251)), "table.arms[1]: lies outside the 318x310 field"),
+    (4, changed(l_table, set_item(["arms", 0, "x"], -1)), "table.arms[0]: lies outside the 318x310 field"),
+    (5, changed(l_table, lambda t: t["arms"].append({"id": "inner", "x": 60, "y": 70, "width": 40, "height": 30})),
+     "table.arms[2]: lies inside table.arms[0]"),
+    (5, changed(l_table, set_item(["arms", 1], {"id": "right", "x": 240, "y": 112, "width": 52, "height": 148})),
+     "table.arms[0] and table.arms[1]: touch only at a corner"),
+    (6, changed(l_table, set_item(["seats"], [])), "table.seats: expected a non-empty array"),
+    (6, changed(l_table, set_item(["seats", 0], "top")), "table.seats[0] (seat 1): expected an object"),
+    (6, changed(l_table, set_item(["seats", 0, "arm"], "middle")),
+     "table.seats[0].arm (seat 1): not an id of table.arms"),
+    (6, changed(l_table, set_item(["seats", 1, "side"], "start")),
+     "table.seats[1].side (seats 2-6): expected one of top, right, bottom, left"),
+    (6, changed(l_table, set_item(["seats", 1, "count"], 0)),
+     "table.seats[1].count (seats from 2): expected an integer from 1 to 20"),
+    (6, changed(l_table, set_item(["seats", 2, "count"], 21)),
+     "table.seats[2].count (seats from 7): expected an integer from 1 to 20"),
+    (7, changed(l_table, lambda t: t["arms"].append({"id": "leg", "x": 100, "y": 100, "width": 30, "height": 100})),
+     "table.arms[0] side 'bottom': split in two by another arm; make two arms of it (seats 14-16)"),
+    (8, changed(l_table, set_item(["seats", 1, "count"], 7)),
+     "table.arms[0] side 'top': too short for seats 2-8: 7 seat(s) need 234 px of free length"),
+    (9, changed(l_table, set_item(["seats", 1, "count"], 6)),
+     "table.arms[0] side 'top': seats 2-7 squeezed closer than 42 px"),
+    (10, changed(straight_table, set_item(["arms", 0, "x"], 30)),
+     "table.seats[0] (seat 1): does not fit into the 318x310 field"),
+    (11, changed(l_table, set_item(["arms", 0, "shift"], {"left": 42})),
+     "table.seats[0] (seat 1): the shift moves it off its side"),
+    (12, close_tables, "table.seats[0] (seat 1): touches an arm of the table"),
+    (13, changed(l_table, set_item(["seats", 0], {"arm": "top", "side": "right"})),
+     "seats 1 and 7: closer than 34 px"),
+    (17, changed(l_table, set_item(["seats"], [{"arm": "top", "side": "top", "count": 20}] * 5)),
+     "table.seats: at most 99 seats"),
+]
+
+WARNING_RULES = {9}
+
+
+class CheckTest(unittest.TestCase):
+    def test_fixtures_pass(self):
+        for name, (make, _pair, _own, _letters) in FIXTURES.items():
+            with self.subTest(fixture=name):
+                self.assertEqual(check_table(make()), TableCheck([], [], len(expand_seats(make()))))
+
+    def test_every_rule_has_a_negative_case(self):
+        for rule, make, message in RULE_CASES:
+            with self.subTest(rule=rule, message=message):
+                check = check_table(make())
+                found = check.warnings if rule in WARNING_RULES else check.errors
+                self.assertIn(message, found)
+                if rule in WARNING_RULES:
+                    self.assertEqual(check.errors, [])
+        covered = {rule for rule, _, _ in RULE_CASES}
+        # 14: below (with a patched constant), 15-16: check_couple (CoupleTest), 2: also there
+        self.assertEqual(covered | {14, 15, 16}, set(range(1, 18)))
+
+    def test_room_for_you_is_checked_for_every_seat(self):
+        # With the real constants the label of a seat can always go onto its
+        # own arm; a wider keep-out around the other seats leaves no room.
+        with mock.patch.object(_table, "SEAT_KEEP_OUT", 40):
+            errors = check_table(l_table()).errors
+        self.assertIn("table.seats[1] (seat 3): no room for the 'You' label", errors)
+        self.assertIn("table.seats[5] (seat 14): no room for the 'You' label", errors)
+
+    def test_one_line_label_rejects_any_line_break(self):
+        for label in ("Table\r", "Table plan", " ", 7, None):
+            with self.subTest(label=label):
+                table = l_table()
+                table["label"] = label
+                self.assertEqual(check_table(table).errors, ["table.label: expected a non-empty one-line string"])
+
+    def test_total_is_none_only_when_the_seats_cannot_be_read(self):
+        self.assertIsNone(check_table("table").total)
+        self.assertIsNone(check_table(changed(l_table, set_item(["seats", 1, "count"], "5"))()).total)
+        self.assertIsNone(check_table(changed(l_table, set_item(["seats", 0], 1))()).total)
+        self.assertEqual(check_table(changed(l_table, set_item(["arms", 0, "x"], "40"))()).total, 16)
+        self.assertEqual(check_table(changed(l_table, set_item(["seats", 0, "arm"], "x"))()).total, 16)
+
+
+#: A table whose ids, label and numbers are easy to spot in a message.
+def secret_table() -> dict:
+    return {
+        "label": "Qzlabel 777",
+        "arms": [{"id": "qzarm", "x": 57, "y": 131, "width": 203, "height": 51, "shift": {"top": 13}}],
+        "seats": [
+            {"arm": "qzarm", "side": "left"},
+            {"arm": "qzarm", "side": "top", "count": 5},
+            {"arm": "qzarm", "side": "right"},
+            {"arm": "qzarm", "side": "bottom", "count": 5},
+        ],
+    }
+
+
+SECRET_NUMBERS = {"57", "131", "203", "51", "260", "182", "777", "157", "77", "33", "130", "19", "43", "253"}
+
+SECRET_CHANGES = [
+    set_item(["qzfield"], 1),
+    set_item(["arms", 0, "qzfield"], 1),
+    set_item(["seats", 0, "qzfield"], 1),
+    set_item(["label"], "Qzlabel\n777"),
+    set_item(["arms", 0, "id"], "Qzarm"),
+    lambda t: t["arms"].append(dict(t["arms"][0], y=19, height=43)),
+    set_item(["arms", 0, "x"], "qz57"),
+    set_item(["arms", 0, "width"], 17),
+    set_item(["arms", 0, "shift"], {"top": 77}),
+    set_item(["arms", 0, "shift"], {"qzside": 1}),
+    set_item(["arms", 0, "x"], 157),
+    lambda t: t["arms"].append({"id": "qzin", "x": 77, "y": 133, "width": 33, "height": 43}),
+    lambda t: t["arms"].append({"id": "qzcorner", "x": 260, "y": 182, "width": 33, "height": 43}),
+    set_item(["seats", 0, "arm"], "qzother"),
+    set_item(["seats", 0, "side"], "qzside"),
+    set_item(["seats", 1, "count"], 33),
+    set_item(["seats", 1, "count"], 7),
+    set_item(["seats", 1, "count"], 6),
+    lambda t: t["arms"].append({"id": "qzleg", "x": 130, "y": 160, "width": 33, "height": 77}),
+    set_item(["arms", 0, "x"], 19),
+    set_item(["arms", 0, "shift"], {"left": 33}),
+    lambda t: t["arms"].append({"id": "qznear", "x": 77, "y": 50, "width": 130, "height": 43}),
+    set_item(["seats", 0], {"arm": "qzarm", "side": "top"}),
+    set_item(["seats"], [{"arm": "qzarm", "side": "top", "count": 20}] * 5),
+]
+
+
+class MessageTest(unittest.TestCase):
+    def test_messages_hold_no_ids_labels_or_numbers_of_the_data(self):
+        messages = []
+        for change in SECRET_CHANGES:
+            table = secret_table()
+            change(table)
+            check = check_table(table)
+            self.assertTrue(check.errors or check.warnings, f"no message for {change}")
+            messages += check.errors + check.warnings
+        for args in (([1, 77], "Qzlabel 777", None), ([1, 2], "Qzlabel", "qzother"),
+                     ([1, 2], "Qzlabel\n777", None), ([1, 2], "Qzlabel " * 9, None)):
+            check = check_couple(secret_table(), *args)
+            self.assertTrue(check.errors or check.warnings, f"no message for {args}")
+            messages += check.errors + check.warnings
+        for message in messages:
+            with self.subTest(message=message):
+                self.assertNotIn("qz", message.lower())
+                self.assertFalse(set(re.findall(r"\d+", message)) & SECRET_NUMBERS)
+
+
+# --------------------------------------------------------------------------
+# The scheme objects
+# --------------------------------------------------------------------------
+
+#: Keys whose values are numbers written as strings.
+NUMBER_KEYS = {"width", "height", "total", "number", "cx", "cy", "r", "ringR", "x", "y"}
+NUMBER_RE = re.compile(r"-?\d+(\.(5|25|75))?")
+
+
+def walk(value):
+    """(key, value) of every field of the nested dicts and lists."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key, item
+            yield from walk(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from walk(item)
+
+
+class SchemeTest(unittest.TestCase):
+    def test_guest_object(self):
+        table = l_table()
+        table["label"] = 'L-shaped <table> & "co"'
+        scheme = guest(table, [8, 9], [9], mine="8 and 9")
+        self.assertEqual(
+            {key: scheme[key] for key in ("width", "height", "hidden", "tableLabel", "total", "mine", "single")},
+            {"width": "318", "height": "310", "hidden": False, "tableLabel": 'L-shaped <table> & "co"',
+             "total": "16", "mine": "8 and 9", "single": False},
+        )
+        self.assertEqual(scheme["badges"], [])
+        self.assertEqual({seat["mark"] for seat in scheme["seats"]}, {"none"})
+        seat8 = scheme["seats"][7]
+        self.assertEqual(
+            seat8,
+            {"number": "8", "cx": "262", "cy": "139", "r": "16.25", "kind": "you", "mark": "none",
+             "ring": True, "ringR": "21"},
+        )
+        self.assertEqual(scheme["seats"][3]["kind"], "couple")
+        self.assertEqual(scheme["seats"][0]["r"], "14.25")
+        self.assertTrue(guest(l_table(), [3], mine="3")["single"])
+
+    def test_staff_object(self):
+        scheme = staff(l_table(), {10: ["G", "L"], 12: []})
+        self.assertTrue(scheme["hidden"])
+        self.assertEqual((scheme["mine"], scheme["single"], scheme["labels"]), ("", False, []))
+        self.assertNotIn("you", {seat["kind"] for seat in scheme["seats"]})
+        self.assertEqual({seat["ring"] for seat in scheme["seats"]}, {False})
+        flagged = [seat for seat in scheme["seats"] if seat["mark"] == "flagged"]
+        self.assertEqual([(seat["number"], seat["r"]) for seat in flagged], [("10", "13.75")])
+        self.assertEqual([badge["letter"] for badge in scheme["badges"]], ["G", "L"])
+
+    def test_modifiers_come_from_the_enumerations(self):
+        for name in FIXTURES:
+            for scheme in fixture_objects(name):
+                with self.subTest(fixture=name, hidden=scheme["hidden"]):
+                    self.assertLessEqual({seat["kind"] for seat in scheme["seats"]}, set(_table.KINDS))
+                    self.assertLessEqual({seat["mark"] for seat in scheme["seats"]}, set(_table.MARKS))
+                    self.assertLessEqual({lab["anchor"] for lab in scheme["labels"]}, set(_table.ANCHORS))
+
+    def test_guest_object_has_no_dietary_data(self):
+        for name in FIXTURES:
+            with self.subTest(fixture=name):
+                guest_object, _ = fixture_objects(name)
+                self.assertEqual(guest_object["badges"], [])
+                self.assertNotIn("flagged", json.dumps(guest_object))
+                self.assertFalse(guest_object["hidden"])
+
+    def test_guest_function_takes_no_letters(self):
+        parameters = inspect.signature(guest_scheme).parameters
+        self.assertNotIn("letters", parameters)
+        self.assertEqual(
+            list(parameters),
+            ["table", "couple_seats", "couple_label", "couple_arm", "own_seats", "plus_one_seats", "mine_text"],
+        )
+        for name in list(parameters)[1:]:
+            self.assertIs(parameters[name].kind, inspect.Parameter.KEYWORD_ONLY)
+        with self.assertRaises(TypeError):
+            guest_scheme(l_table(), own_seats=[8], plus_one_seats=[], mine_text="8", letters={8: ["A"]}, **couple())
+        self.assertEqual(
+            list(inspect.signature(staff_scheme).parameters),
+            ["table", "couple_seats", "couple_label", "couple_arm", "letters"],
+        )
+
+    def test_numbers_are_strings_of_half_or_quarter_pixels(self):
+        for name in FIXTURES:
+            for scheme in fixture_objects(name):
+                for key, value in walk(scheme):
+                    if key in NUMBER_KEYS:
+                        with self.subTest(fixture=name, key=key, value=value):
+                            self.assertIsInstance(value, str)
+                            self.assertRegex(value, rf"\A{NUMBER_RE.pattern}\Z")
+                for token in re.findall(r"[^MLAZ ]+", scheme["outline"]):
+                    self.assertRegex(token, rf"\A{NUMBER_RE.pattern}\Z")
+
+    def test_digest_of_the_objects_is_fixed(self):
+        objects = [fixture_objects(name) for name in FIXTURES]
+        text = json.dumps(objects, sort_keys=True)
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), DIGEST)
+
+    def test_radii_follow_the_strokes(self):
+        half = Fraction(1, 2)
+        self.assertEqual(Fraction(_table.SEAT_R), _table.SEAT_DIAMETER * half - Fraction(_table.SEAT_STROKE) * half)
+        self.assertEqual(Fraction(_table.FLAG_R), _table.SEAT_DIAMETER * half - Fraction(_table.FLAG_STROKE) * half)
+        self.assertEqual(Fraction(_table.YOU_R), _table.YOU_DIAMETER * half - Fraction(_table.SEAT_STROKE) * half)
+        self.assertEqual(_table.RING_R, "21")
+        self.assertEqual(_table.BADGE_R, "9")
+
+
+class InputTest(unittest.TestCase):
+    def test_layout_functions_refuse_an_unchecked_table(self):
+        table = changed(l_table, set_item(["seats", 1, "count"], 7))()
+        expected = check_table(table).errors
+        calls = (
+            lambda: expand_seats(table),
+            lambda: badge_capacity(table, 1),
+            lambda: guest(table, [1]),
+            lambda: staff(table, {}),
+        )
+        for call in calls:
+            with self.subTest(call=call):
+                with self.assertRaises(TableError) as caught:
+                    call()
+                self.assertEqual(caught.exception.errors, expected)
+        self.assertTrue(issubclass(TableError, ValueError))
+
+    def test_layout_functions_refuse_contradictory_parameters(self):
+        cases = (
+            lambda: badge_capacity(l_table(), 17),
+            lambda: badge_capacity(l_table(), True),
+            lambda: guest(l_table(), []),
+            lambda: guest(l_table(), [8, 8]),
+            lambda: guest(l_table(), [17]),
+            lambda: guest(l_table(), [8, 9], [8]),
+            lambda: guest(l_table(), [4]),
+            lambda: guest(l_table(), [8], mine=None),
+            lambda: guest(l_table(), [8], pair=couple((4, 5, 6))),
+            lambda: guest(l_table(), [8], pair=couple(arm="middle")),
+            lambda: guest(l_table(), [8], pair=couple((), arm=None)),
+            lambda: guest(l_table(), [8], pair=couple(label="")),
+            lambda: staff(l_table(), {0: ["A"]}),
+            lambda: staff(l_table(), {8: "A"}),
+            lambda: staff(l_table(), {8: [""]}),
+            lambda: staff(l_table(), [8]),
+        )
+        for number, call in enumerate(cases):
+            with self.subTest(case=number):
+                with self.assertRaises(TableError):
+                    call()
+
+
+# --------------------------------------------------------------------------
+# The module itself
+# --------------------------------------------------------------------------
+
+
+class ModuleTest(unittest.TestCase):
+    def test_module_computes_with_integers_and_the_standard_library_only(self):
+        tree = ast.parse(MODULE.read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant):
+                self.assertNotIsInstance(node.value, float, f"line {node.lineno}")
+            if isinstance(node, (ast.BinOp, ast.AugAssign)):
+                self.assertNotIsInstance(node.op, ast.Div, f"line {node.lineno}")
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                self.assertNotIn(node.func.id, {"float", "round"}, f"line {node.lineno}")
+            if isinstance(node, ast.Import):
+                imported |= {alias.name for alias in node.names}
+            if isinstance(node, ast.ImportFrom):
+                imported.add(node.module)
+        self.assertEqual(imported, {"re", "collections.abc", "typing"})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,87 @@
+# Runs the unit tests and the repository hygiene checks.
+# No secrets, nothing is deployed.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Repository hygiene (no tracked media, no tracked build output)
+        run: |
+          set -euo pipefail
+          # Names are read NUL-separated and unquoted, so non-ASCII names are matched as is.
+          tracked() {
+            git -c core.quotePath=false ls-files -z -- "$@" | tr '\0' '\n'
+          }
+          names="$(git -c core.quotePath=false ls-files -z | tr -cd '\0' | wc -c)"
+          lines="$(tracked | wc -l)"
+          returns="$(tracked | grep -ac $'\r' || true)"
+          if [ "$names" -ne "$lines" ] || [ "$returns" -ne 0 ]; then
+            echo "Tracked file names must not contain line breaks or carriage returns" >&2
+            exit 1
+          fi
+          # Every tracked file is checked: the repository carries no media at all.
+          media="$(tracked | grep -aEi '\.(png|jpe?g|webp|gif|avif|mp4|mov|webm|ico|svg)$' || true)"
+          if [ -n "$media" ]; then
+            echo "Media files must not be tracked:" >&2
+            echo "$media" >&2
+            exit 1
+          fi
+          output="$(tracked dist)"
+          if [ -n "$output" ]; then
+            echo "Generated files must not be tracked:" >&2
+            echo "$output" >&2
+            exit 1
+          fi
+          echo "OK: no tracked media or build output"
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          python -m unittest
+
+      - name: Working tree stays clean
+        run: |
+          set -euo pipefail
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            echo "The tests left untracked or modified files:" >&2
+            echo "$status" >&2
+            exit 1
+          fi
+          echo "OK: working tree is clean"

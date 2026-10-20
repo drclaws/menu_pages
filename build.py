@@ -30,7 +30,7 @@ COMMANDS = {
 
 
 def make_parser() -> argparse.ArgumentParser:
-    """The command line parser: one subcommand, no parameters yet."""
+    """The command line parser: a required subcommand (build or validate), no parameters yet."""
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
         description="Builder of personal dinner-menu pages (not implemented yet).",

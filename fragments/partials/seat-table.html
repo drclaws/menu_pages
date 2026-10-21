@@ -1,0 +1,24 @@
+<!-- The table of the seats on the staff page; expects in `.`: the seating widget - scheme, rows[] (number, name, isPlusOne, hostName, roleLabel, isCouple, isFree, tags[]). One row per seat in its order: the number in a frame (grey for the couple), then the guest. A free or reserved seat shows a dash; a +1 shows whose guest it is and the name, or a placeholder while the name is unknown; a role follows the name; the dietary needs are orange pills. A rule parts the table from a scheme above it. -->
+<!-- if:.rows --><!-- if:.scheme -->
+<hr class="divider seating__divider"><!-- endif -->
+<table class="seat-table">
+  <thead>
+    <tr><th class="seat-table__no" scope="col">No.</th><th scope="col">Guest · dietary notes</th></tr>
+  </thead>
+  <tbody>
+    <!-- each:.rows -->
+    <tr>
+      <td class="seat-table__no"><!-- if:.isCouple --><span class="seat-number seat-number--couple">{{.number}}</span><!-- endif --><!-- if:!.isCouple --><span class="seat-number">{{.number}}</span><!-- endif --></td>
+      <td><div class="seat-table__guest"><!-- if:.isFree -->
+        <span class="seat-table__free">—</span><!-- endif --><!-- if:!.isFree --><!-- if:.isPlusOne -->
+        <span class="seat-table__name">+1</span>
+        <span class="seat-table__role">· {{.hostName}}’s guest, <!-- if:.name -->{{.name}}<!-- endif --><!-- if:!.name -->[name]<!-- endif --></span><!-- endif --><!-- if:!.isPlusOne -->
+        <span class="seat-table__name">{{.name}}</span><!-- if:.roleLabel -->
+        <span class="seat-table__role">· {{.roleLabel}}</span><!-- endif --><!-- endif --><!-- if:.tags -->
+        <ul class="pills" role="list"><!-- each:.tags --><li class="pill pill--flag">{{.}}</li><!-- endeach --></ul><!-- endif --><!-- endif -->
+      </div></td>
+    </tr>
+    <!-- endeach -->
+  </tbody>
+</table>
+<!-- endif -->

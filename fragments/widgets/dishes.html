@@ -1,0 +1,7 @@
+<!-- A list of dishes; expects in `.`: domId, title (small capitals over the list, not a heading; "" - none), items[] (dishes). -->
+<div class="widget dishes-widget" id="{{.domId}}"><!-- if:.title -->
+  <p class="dishes__title">{{.title}}</p><!-- endif -->
+  <ul class="dishes" role="list">
+    <!-- each:.items --><!-- include:partials/dish-item --><!-- endeach -->
+  </ul>
+</div>

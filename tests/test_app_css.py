@@ -15,6 +15,7 @@ SECTIONS = (
     ("3", "Base"),
     ("4", "Layout primitives"),
     ("5", "Components"),
+    ("5a", "Page"),
     ("6", "Scheme"),
     ("7", "Motion & reveal"),
     ("8", "Print"),
@@ -28,6 +29,37 @@ RAW_VALUE_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|col
                           r"|(?<![\w.#-])\d*\.?\d+(?:px|rem|em|ms|s|vw|vh|svh|dvh)\b")
 CONDITION_RE = re.compile(r"@media|@container|@supports")
 PANELS = "html.js .sets__tabs:not([hidden]) ~ .sets__panels"
+
+#: A math function whose arguments are scanned for bare factors.
+MATH_RE = re.compile(r"\b(?:calc|min|max|clamp)\(")
+#: A unitless number next to `*` or `/`: a size made from a token by a factor.
+FACTOR_RE = re.compile(r"[*/]\s*(-?\d*\.?\d+)(?![\w.%(])|(?<![\w.#-])(-?\d*\.?\d+)\s*[*/]")
+#: The factors allowed outside the token sections: a sign (`* -1`) and the
+#: switch of the tab row (`* 999` turns a difference into all or nothing).
+ALLOWED_FACTORS = frozenset({"-1", "999"})
+
+
+def math_arguments(css):
+    """The arguments of every outermost calc(), min(), max(), clamp() in the CSS."""
+    found, position = [], 0
+    while True:
+        match = MATH_RE.search(css, position)
+        if not match:
+            return found
+        depth, end = 0, match.end() - 1
+        for end in range(match.end() - 1, len(css)):
+            depth += {"(": 1, ")": -1}.get(css[end], 0)
+            if depth == 0:
+                break
+        found.append(css[match.end():end])
+        position = end + 1
+
+
+def bare_factors(css):
+    """Every unitless factor of a math function, but the allowed ones."""
+    return [factor for arguments in math_arguments(css)
+            for pair in FACTOR_RE.findall(arguments) for factor in pair
+            if factor and factor not in ALLOWED_FACTORS]
 
 
 def strip_comments(css):
@@ -95,6 +127,27 @@ class StyleSheetTest(unittest.TestCase):
         # what comes before the first section is the header comment only
         first = self.raw.index(self.sections["1"][1])
         self.assertEqual(strip_comments(self.raw[:first]).strip(), "")
+
+    def test_no_sizes_made_by_a_factor_outside_the_token_sections(self):
+        # `calc(var(--space-3xs) * 0.75)` is a raw value too: a size off the
+        # scale of the tokens; it belongs in a named token of section 1a
+        for number, (_first_line, text) in self.sections.items():
+            if number not in TOKEN_SECTIONS:
+                with self.subTest(section=number):
+                    self.assertEqual(bare_factors(strip_comments(text)), [])
+
+    def test_the_factor_check_tells_a_factor_from_a_token(self):
+        for css in ("a { b: calc(var(--x) * 0.75); }", "a { b: calc(var(--x) / 2); }",
+                    "a { b: calc(0.5 * var(--x)); }", "a { b: max(var(--x), calc(var(--y) * 2)); }",
+                    "a { b: min(100%, calc(var(--x) * 1.5)); }"):
+            with self.subTest(css=css):
+                self.assertEqual(len(bare_factors(css)), 1)
+        for css in ("a { b: calc(var(--x) * -1); }", "a { b: calc((var(--x) - 100%) * 999); }",
+                    "a { b: calc(var(--x) * var(--y) / var(--z)); }",
+                    "a { b: calc(var(--x, 1) - 1); }", "a { grid-column: 1 / -1; }",
+                    "a { b: calc(var(--x) + 2px); }"):
+            with self.subTest(css=css):
+                self.assertEqual(bare_factors(css), [])
 
     def test_condition_numbers_match_their_tokens(self):
         # var() does not work in conditions: each number is repeated from a
@@ -174,6 +227,77 @@ class SetSwitcherStylesTest(unittest.TestCase):
         self.assertIn("var(--sets-tab-min)", self.components)
         self.assertNotIn("--events-tab-min", self.components)
         self.assertNotIn("--events-count", self.code)
+
+
+class MenuStylesTest(unittest.TestCase):
+    """The components of the menu (section 5), the page (5a) and its print (8)."""
+
+    @classmethod
+    def setUpClass(cls):
+        raw = APP_CSS.read_text(encoding="utf-8")
+        sections = section_texts(raw)
+        cls.components = rules(strip_comments(sections["5"][1]))
+        cls.page_code = strip_comments(sections["5a"][1])
+        cls.page = rules(cls.page_code)
+        cls.print = rules(media_blocks(strip_comments(sections["8"][1]), "print")[0])
+
+    def test_the_components_are_in_section_5(self):
+        for selector in (".note-line", ".pills", ".pill", ".pill--flag", ".pill--plain",
+                         ".legend", ".legend__mark", ".seat-table", ".seat-number",
+                         ".seat-number--couple", ".seating__meta", ".text-widget--card",
+                         ".text-widget--signature", ".dishes", ".dish", ".drink",
+                         ".schedule--ruled .schedule__item", ".staff-bar", ".staff-footer",
+                         ".sets__head", ".sets__pairing, .sets__swaps", ".sets__note"):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.components)
+
+    def test_the_page_is_in_section_5a(self):
+        for selector in (".cover", ".cover--staff", ".cover__counters", ".menu--staff body"):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.page)
+        # the page depends on the audience alone, never on the width
+        self.assertNotRegex(self.page_code, r"@media|@container")
+
+    def test_the_flags_use_the_menu_tokens(self):
+        self.assertEqual(self.components[".pill--flag"],
+                         "border-color: var(--color-flag-line); "
+                         "background-color: var(--color-flag-bg); "
+                         "color: var(--color-flag-text); "
+                         "font-weight: var(--font-weight-heading);")
+        mark = self.components[".legend__mark"]
+        self.assertIn("background-color: var(--color-flag);", mark)
+        self.assertIn("color: var(--color-on-flag);", mark)
+        self.assertIn("border-radius: var(--radius-round);", mark)
+
+    def test_an_empty_row_of_pills_takes_no_room(self):
+        self.assertEqual(self.components[".pills:empty"], "display: none;")
+
+    def test_the_courses_are_numbered_by_a_counter_of_the_list(self):
+        self.assertIn("counter-reset: course;", self.components[".sets__courses"])
+        self.assertIn("counter-increment: course;", self.components[".sets__courses > .dish"])
+        self.assertIn("content: counter(course);", self.components[".sets__courses > .dish::before"])
+
+    def test_the_audience_sets_the_alignment_and_the_type_size(self):
+        self.assertEqual(self.page[".menu--guest .cover, .menu--guest .section"],
+                         "text-align: center;")
+        self.assertEqual(self.page[".menu--guest .card, .menu--guest .text-widget--card"],
+                         "text-align: start;")
+        # one step of the body text larger: 17px at a 16px root
+        self.assertEqual(self.page[".menu--staff body"],
+                         "font-size: calc(var(--text-base) * var(--text-base-desktop) "
+                         "/ var(--text-base-mobile));")
+
+    def test_print_keeps_the_background_colours_of_flags_and_labels(self):
+        self.assertEqual(self.print[".legend__mark, .pill, .seat-number--couple, "
+                                    ".time-label--strong, .staff-bar"],
+                         "-webkit-print-color-adjust: exact; print-color-adjust: exact;")
+
+    def test_print_of_the_staff_page_is_compact(self):
+        self.assertEqual(self.print[".menu--staff .section"], "margin-block: var(--space-md);")
+        self.assertEqual(self.print[".seat-table td"], "padding-block: var(--space-3xs);")
+        self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
+        self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
+        self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
 
 
 if __name__ == "__main__":

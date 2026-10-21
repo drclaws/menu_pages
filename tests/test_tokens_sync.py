@@ -47,6 +47,8 @@ MENU_TOKENS = frozenset({
     "--scheme-font-couple",
     "--scheme-tracking-couple",
     "--sets-tab-min",
+    "--label-padding-block",
+    "--number-box-width",
 })
 
 #: Plain properties of `:root` compared like tokens: the theme is part of the design.

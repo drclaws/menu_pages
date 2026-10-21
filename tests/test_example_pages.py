@@ -8,13 +8,19 @@ from pathlib import Path
 
 from tests import support
 
+from menu_tools import _schema  # noqa: E402  (support prepares sys.path)
+
 ROOT = support.ROOT
 EXAMPLES = ROOT / "examples"
 #: name -> (data directory, arguments of the build)
 SETS = {
-    "data": (EXAMPLES / "data", ("--base-path", "/menu", "--allow-path", "/invite")),
+    "data": (EXAMPLES / "data", ("--base-path", "/menu")),
     "data-plain": (EXAMPLES / "data-plain", ("--base-path", "/menu")),
 }
+#: Every address of a page: the shared files under the base path of the builds.
+ASSETS_PREFIX = "/menu/assets/"
+#: The attributes that hold an address.
+ADDRESS_RE = re.compile(r'(?i)\b(?:href|src|srcset|poster|action|formaction)\s*=\s*"([^"]*)"')
 SUMMARIES = {
     "data": "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n",
     "data-plain": "validate: OK - 4 seat(s), 3 guest record(s) + staff, 6 dish(es), 3 set(s), 2 drink(s)\n",
@@ -68,7 +74,8 @@ class ExampleDataTest(unittest.TestCase):
 
     def test_the_main_set_shows_every_part_of_the_format(self):
         menu, guests = load(EXAMPLES / "data")
-        self.assertEqual(menu["invitationLink"]["href"], "/invite/{token}/")
+        widget_types = {widget["type"] for section in menu["sections"] for widget in section.get("widgets", [])}
+        self.assertEqual(widget_types, set(_schema.WIDGET_TYPES))
         self.assertEqual(len(menu["reservedSeats"]), 1)
         self.assertEqual({tuple(item.get("audience", "all") for item in section.get("widgets", []))
                           for section in menu["sections"] if section["id"] in ("starters", "drinks")},
@@ -118,14 +125,17 @@ class ExamplePagesTest(unittest.TestCase):
                     self.assertNotRegex(page, r'(?i)<meta[^>]+(?:property|name)="og:')
                     self.assertIn('<link rel="stylesheet" href="/menu/assets/app.css">', page)
 
-    def test_the_link_back_leads_to_the_own_invitation(self):
-        _out, _menu, guests, pages, staff = self.built["data"]
-        for record in guests:
-            links = re.findall(r'href="(/invite/[^"]*)"', pages[record["token"]])
-            with self.subTest(page=record["token"]):
-                self.assertEqual(links, [] if record["token"] == staff else [f"/invite/{record['token']}/"])
-        for token, page in self.built["data-plain"][3].items():
-            self.assertNotIn("/invite/", page)
+    def test_the_pages_link_nowhere(self):
+        # no link at all, and every address is a shared file of the output
+        for name, (_out, _menu, _guests, pages, _staff) in self.built.items():
+            for token, page in pages.items():
+                with self.subTest(set=name, page=token):
+                    self.assertNotRegex(page, r"(?i)<a[\s/>]")
+                    self.assertNotRegex(page, r"(?i)<area[\s/>]")
+                    addresses = ADDRESS_RE.findall(page)
+                    self.assertTrue(addresses)
+                    for address in addresses:
+                        self.assertTrue(address.startswith(ASSETS_PREFIX), address)
 
     def test_the_table_plan_is_drawn_where_there_is_a_table(self):
         for name, (_out, menu, _guests, pages, staff) in self.built.items():

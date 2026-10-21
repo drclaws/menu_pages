@@ -214,11 +214,20 @@ class GuestPageTest(unittest.TestCase):
                 ("starters", ["dishes"]),
                 ("main", ["sets", "text"]),
                 ("drinks", ["drinks"]),
-                ("signature", ["text", "link"]),
+                ("signature", ["text"]),
             ],
         )
-        link = widgets(tree, "link")[0]
-        self.assertEqual((link["href"], link["text"]), ("/invite/crane-7m2p/", "← Back to the invitation"))
+        (signature,) = section(tree, "signature")["widgets"]
+        self.assertEqual((signature["text"], signature["variant"]), (fixtures.COUPLE_NAMES, "signature"))
+
+    def test_the_token_names_the_page_and_is_not_in_its_tree(self):
+        for name, make in fixtures.SETS.items():
+            menu, guests = make()
+            trees, _report = build(menu, guests)
+            for page in trees.guests:
+                with self.subTest(fixture=name, record=page.number):
+                    self.assertEqual(page.token, guests[page.number - 1]["token"])
+                    self.assertNotIn(page.token.lower(), json.dumps(page.tree).lower())
 
     def test_dom_ids_count_every_widget_of_the_data(self):
         boris = self.tree("Boris")
@@ -291,16 +300,6 @@ class GuestPageTest(unittest.TestCase):
         guests[0]["sections"] = {}
         trees, _report = build(menu, guests)
         self.assertIsNone(section(trees.staff.tree, "kids"))
-
-    def test_a_link_without_an_address_is_left_out(self):
-        menu, guests = fixtures.reserved19()
-        del menu["invitationLink"]
-        trees, report = build(menu, guests)
-        self.assertEqual(widgets(trees.guests[0].tree, "link"), [])
-        self.assertIn(
-            "menu.json: field 'sections' has a 'link' widget, but there is no 'invitationLink': the widget shows nothing",
-            report.warnings,
-        )
 
 
 # --------------------------------------------------------------------------
@@ -384,7 +383,6 @@ class StaffPageTest(unittest.TestCase):
                 ("drinks", "Drinks", "What to serve and when"),
             ],
         )
-        self.assertEqual(widgets(self.tree, "link"), [])
         self.assertEqual(seating(self.tree)["footnote"], "Seat 13 stays free all evening: keep its place setting.")
 
     def test_the_dish_for_the_staff_only(self):
@@ -558,7 +556,6 @@ WIDGET_FIELDS = {
     "dishes": {"title", "items"},
     "sets": {"items", "note", "count", "multiple"},
     "drinks": {"groups", "list", "note"},
-    "link": {"href", "text"},
 }
 MY_SEAT_FIELDS = {"number", "mark"}
 LEGEND_FIELDS = {"letter", "label"}

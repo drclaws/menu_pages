@@ -132,11 +132,27 @@ def _(menu, guests):
     "unknown_widget_type",
     errors=[
         M + "field 'sections[2].widgets[0].type' names an unknown widget type 'dish' (did you mean 'dishes'?); "
-        "known: text, seating, dishes, sets, drinks, link"
+        "known: text, seating, dishes, sets, drinks"
     ],
 )
 def _(menu, guests):
     menu["sections"][2]["widgets"][0]["type"] = "dish"
+
+
+@case(
+    "link_is_no_widget_type",
+    errors=[
+        M + "field 'sections[5].widgets[1].type' names an unknown widget type 'link' (did you mean 'drinks'?); "
+        "known: text, seating, dishes, sets, drinks"
+    ],
+)
+def _(menu, guests):
+    menu["sections"][5]["widgets"].append({"type": "link"})
+
+
+@case("link_to_an_invitation_is_an_unknown_field", errors=[M + "unknown field 'invitationLink'"])
+def _(menu, guests):
+    menu["invitationLink"] = {"text": "Back", "href": "/{token}/"}
 
 
 @case("two_seating_widgets", errors=[M + "field 'sections' has 2 seating widgets; there may be only one"])
@@ -197,34 +213,10 @@ def _(menu, guests):
 
 @case(
     "staff_widget_in_a_guest_section",
-    errors=[M + "field 'sections[5].widgets[1].audience' is 'staff' in a section for 'guest': nobody sees it"],
+    errors=[M + "field 'sections[5].widgets[0].audience' is 'staff' in a section for 'guest': nobody sees it"],
 )
 def _(menu, guests):
-    menu["sections"][5]["widgets"][1]["audience"] = "staff"
-
-
-@case(
-    "link_for_the_staff",
-    errors=[M + "field 'sections[3].widgets[2]' is a link to the invitation of a guest: it cannot be for the staff only"],
-)
-def _(menu, guests):
-    menu["sections"][3]["widgets"].append({"type": "link", "audience": "staff"})
-
-
-@case(
-    "back_link_without_the_token",
-    errors=[M + "field 'invitationLink.href' must hold '{token}' exactly once (the page of the same guest)"],
-)
-def _(menu, guests):
-    menu["invitationLink"]["href"] = "/invite/"
-
-
-@case(
-    "back_link_to_another_host",
-    errors=[M + "field 'invitationLink.href' must be a path from the site root, starting with a single '/'"],
-)
-def _(menu, guests):
-    menu["invitationLink"]["href"] = "//invite/{token}/"
+    menu["sections"][5]["widgets"][0]["audience"] = "staff"
 
 
 @case(
@@ -237,10 +229,18 @@ def _(menu, guests):
 
 @case(
     "token_in_a_text",
-    errors=[M + "field 'sections[3].widgets[1].text' must not contain '{token}': it works only in 'invitationLink.href'"],
+    errors=[M + "field 'sections[3].widgets[1].text' must not contain '{token}': the pages of the menu hold no token"],
 )
 def _(menu, guests):
-    menu["sections"][3]["widgets"][1]["text"] = "Your page: /invite/{token}/"
+    menu["sections"][3]["widgets"][1]["text"] = "Your page: {token}"
+
+
+@case(
+    "token_in_a_staff_text",
+    errors=[M + "field 'staff.reminder' must not contain '{token}': the pages of the menu hold no token"],
+)
+def _(menu, guests):
+    menu["staff"]["reminder"] = "The staff page is /menu/{token}/"
 
 
 @case(
@@ -807,33 +807,6 @@ class TableMessagesTest(unittest.TestCase):
         self.assertTrue(report.errors[1].endswith("duplicate key 'note' in '[0].sections.main' (JSON keeps only the last one; merge or rename them)"))
         for message in report.errors:
             self.assertNotIn("Olga", message)
-
-
-class HrefTest(unittest.TestCase):
-    def test_good_paths(self):
-        for href in ("/invite/{token}/", "/{token}/", "/invite/{token}/menu/"):
-            with self.subTest(href=href):
-                self.assertIsNone(_schema.href_problem(href))
-
-    def test_bad_paths(self):
-        root = "must be a path from the site root, starting with a single '/'"
-        segments = "may only hold path segments of A-Z, a-z, 0-9, '_' and '-', and '{token}' as a whole segment"
-        once = "must hold '{token}' exactly once (the page of the same guest)"
-        cases = {
-            "invite/{token}/": root,
-            "//{token}/": root,
-            "/invite/{token}": "must end with '/'",
-            "/invite/{token}/?a=1/": segments,
-            "/invite/../{token}/": segments,
-            "/invite/x{token}/": segments,
-            "/invite/{token}#top/": segments,
-            "/invite//{token}/": segments,
-            "/invite/": once,
-            "/{token}/{token}/": once,
-        }
-        for href, problem in cases.items():
-            with self.subTest(href=href):
-                self.assertEqual(_schema.href_problem(href), problem)
 
 
 class UsageTest(unittest.TestCase):

@@ -1,10 +1,8 @@
 """Privacy of the finished pages, read file by file after a build.
 
-* the token of a guest is in its own directory and on its own page alone, as
-  many times as the page has links back to the invitation and only inside
-  `href="<prefix>/<token>/"`; the staff page holds no token of a guest;
-* the token of the staff page is in no file at all (only the name of its
-  directory);
+* no token of a record, the staff record included, is in any file of the
+  output, its own page included: a token is only the name of the directory
+  of its page;
 * `{token}` is left nowhere;
 * the name of a record (and of each of its seats) is on its own page and on
   the staff page alone;
@@ -13,16 +11,12 @@
 """
 
 import json
-import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from tests import fixtures, support
-
-import build  # noqa: E402  (support prepares sys.path)
-from menu_tools import _core  # noqa: E402
 
 
 def data_sets() -> dict[str, tuple[dict, list]]:
@@ -57,17 +51,7 @@ def labels(menu: dict) -> set[str]:
     return found - {""}
 
 
-def link_counts(data_dir: Path) -> dict[int, int]:
-    """Record number -> the number of links back to the invitation on its page."""
-    trees = build.load_data(data_dir, _core.Report()).trees
-    return {
-        page.number: sum(1 for section in page.tree["sections"] for widget in section["widgets"]
-                         if widget["type"] == "link")
-        for page in trees.guests
-    }
-
-
-def privacy_problems(out: Path, menu: dict, guests: list, links: dict[int, int]) -> list[str]:
+def privacy_problems(out: Path, menu: dict, guests: list) -> list[str]:
     """What the finished output shows that it must not, as readable lines."""
     problems: list[str] = []
     files = {name: (out / name).read_text(encoding="utf-8") for name in support.tree_files(out)}
@@ -75,36 +59,19 @@ def privacy_problems(out: Path, menu: dict, guests: list, links: dict[int, int])
     staff = {record["token"] for record in guests if record.get("staff") is True}
     pages = {token: f"{token}/index.html" for token in numbers}
     staff_pages = {pages[token] for token in staff}
-    href = (menu.get("invitationLink") or {}).get("href", "")
     for name, text in files.items():
         lowered = text.lower()
         if "{token}" in text:
             problems.append(f"{name}: '{{token}}' is left")
         for token, number in numbers.items():
-            if token.lower() not in lowered:
-                continue
-            if token in staff:
-                problems.append(f"{name}: the staff token")
-            elif name != pages[token]:
-                problems.append(f"{name}: the token of guest #{number}")
+            if token.lower() in lowered:
+                problems.append(f"{name}: the staff token" if token in staff else f"{name}: the token of guest #{number}")
         for word, owners in record_names(guests).items():
             allowed = {pages[guests[owner - 1]["token"]] for owner in owners} | staff_pages
             if name not in allowed and support.occurs(word, text):
                 problems.append(f"{name}: the name {word!r}")
         if name not in staff_pages:
             problems += [f"{name}: the label {word!r}" for word in sorted(labels(menu)) if support.occurs(word, text)]
-    for token, number in numbers.items():
-        if token in staff:
-            continue
-        text = files[pages[token]]
-        expected = links.get(number, 0)
-        found = text.lower().count(token.lower())
-        own = text.lower().count(f'href="{href.replace("{token}", token)}"'.lower()) if href else 0
-        if not found == own == expected:
-            problems.append(
-                f"{pages[token]}: the own token {found} time(s), in the link back {own} time(s), "
-                f"{expected} link(s) back expected"
-            )
     return problems
 
 
@@ -119,34 +86,34 @@ class OutputPrivacyTest(unittest.TestCase):
             data = fixtures.write_data(cls.tmp / f"data-{index}", menu, guests)
             for base in ("/", "/menu"):
                 out = cls.tmp / f"out-{index}{base.replace('/', '-')}"
-                allowed = support.allowed_path(menu)
-                allow = ["--allow-path", allowed] if allowed else []
-                result = support.run_main("build", "--data", data, "--out", out, "--base-path", base, *allow)
+                result = support.run_main("build", "--data", data, "--out", out, "--base-path", base)
                 if result.returncode != 0:
                     raise AssertionError(result.stderr)
-                cls.built[name, base] = (out, menu, guests, link_counts(data))
+                cls.built[name, base] = (out, menu, guests)
 
     def test_the_finished_pages_show_what_they_may(self):
-        for (name, base), (out, menu, guests, links) in self.built.items():
+        for (name, base), (out, menu, guests) in self.built.items():
             with self.subTest(data=name, base=base):
-                self.assertEqual(privacy_problems(out, menu, guests, links), [])
+                self.assertEqual(privacy_problems(out, menu, guests), [])
 
-    def test_the_pages_of_a_menu_with_a_link_back_have_it(self):
-        for (name, base), (out, menu, guests, links) in self.built.items():
+    def test_a_token_is_only_the_name_of_the_directory_of_its_page(self):
+        for (name, base), (out, _menu, guests) in self.built.items():
             with self.subTest(data=name, base=base):
-                expected = 1 if menu.get("invitationLink") else 0
-                self.assertEqual(set(links.values()), {expected})
+                self.assertEqual(
+                    sorted(path.name for path in out.iterdir() if path.name != "assets"),
+                    sorted(fixtures.tokens(guests)),
+                )
 
     def test_the_names_are_not_part_of_the_shared_texts(self):
         # otherwise a name on a page would prove nothing
-        for (name, _base), (out, menu, guests, _links) in self.built.items():
+        for (name, _base), (out, menu, guests) in self.built.items():
             with self.subTest(data=name):
                 shared = json.dumps(menu, ensure_ascii=False)
                 for word in record_names(guests):
                     self.assertFalse(support.occurs(word, shared), word)
 
     def test_the_check_finds_what_leaks(self):
-        out, menu, guests, links = self.built["fixture reserved19", "/menu"]
+        out, menu, guests = self.built["fixture reserved19", "/menu"]
         copy = self.tmp / "tampered"
         shutil.copytree(out, copy)
         self.addCleanup(shutil.rmtree, copy)
@@ -156,15 +123,25 @@ class OutputPrivacyTest(unittest.TestCase):
         text = page.read_text(encoding="utf-8")
         leak = f"<p>{second['name']} {staff} {first['token']}</p></main>"
         page.write_text(text.replace("</main>", leak, 1), encoding="utf-8")
+        other = copy / second["token"] / "index.html"
+        text = other.read_text(encoding="utf-8")
+        other.write_text(text.replace("</main>", f"<p>{first['token'].upper()}</p></main>", 1), encoding="utf-8")
         with open(copy / "assets" / "app.css", "a", encoding="utf-8") as handle:
             handle.write(f"/* {first['token'].upper()} no nuts */\n")
-        problems = privacy_problems(copy, menu, guests, links)
-        self.assertIn(f"{first['token']}/index.html: the name {second['name']!r}", problems)
-        self.assertIn(f"{first['token']}/index.html: the staff token", problems)
-        self.assertIn("assets/app.css: the token of guest #1", problems)
-        self.assertIn("assets/app.css: the label 'no nuts'", problems)
-        self.assertTrue(any(re.match(rf"{re.escape(first['token'])}/index\.html: the own token", line)
-                            for line in problems), problems)
+        problems = privacy_problems(copy, menu, guests)
+        for line in (
+            f"{first['token']}/index.html: the name {second['name']!r}",
+            f"{first['token']}/index.html: the staff token",
+            # its own token is a leak as well
+            f"{first['token']}/index.html: the token of guest #1",
+            f"{second['token']}/index.html: the token of guest #1",
+            "assets/app.css: the token of guest #1",
+            "assets/app.css: the label 'no nuts'",
+        ):
+            self.assertIn(line, problems)
+        # the untouched pages hold none
+        self.assertFalse([line for line in problems if not line.startswith(
+            (f"{first['token']}/", f"{second['token']}/", "assets/"))], problems)
 
 
 if __name__ == "__main__":

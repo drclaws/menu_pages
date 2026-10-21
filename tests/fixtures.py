@@ -14,9 +14,8 @@ Each function returns a fresh `(menu, guests)` pair that a test may change.
   last seat with a +1 on seat 1, a record for two, a +1 without a name and
   one with a name, seats with dietary notes (one with two), a note to a
   section, a hidden widget and the staff record.
-* `plain` - no table, no dietary notes, no allergens, no link back to the
-  invitation; three sets, one category of drinks, three records (one with a
-  +1) and the staff record.
+* `plain` - no table, no dietary notes, no allergens; three sets, one
+  category of drinks, three records (one with a +1) and the staff record.
 
 The dietary notes name what to leave out ("no nuts"), never a reason.
 """
@@ -31,7 +30,6 @@ EVENT = {
     "when": "15 June 2030, 19:00",
     "place": "Riverside Bistro · Example Street 5",
 }
-INVITATION_LINK = {"text": "← Back to the invitation", "href": "/invite/{token}/"}
 COUPLE_LABEL = "Ivan · Vera"
 
 REQUIREMENTS = {
@@ -102,7 +100,6 @@ _MOCKUP16_MENU = {
     "schemaVersion": 1,
     "coupleNames": COUPLE_NAMES,
     "event": EVENT,
-    "invitationLink": INVITATION_LINK,
     "staff": STAFF,
     "requirements": REQUIREMENTS,
     "allergens": ALLERGENS,
@@ -278,10 +275,7 @@ _MOCKUP16_MENU = {
             "id": "signature",
             "title": "Enjoy the evening!",
             "audience": "guest",
-            "widgets": [
-                {"type": "text", "variant": "signature", "text": COUPLE_NAMES},
-                {"type": "link"},
-            ],
+            "widgets": [{"type": "text", "variant": "signature", "text": COUPLE_NAMES}],
         },
     ],
 }
@@ -328,7 +322,6 @@ _RESERVED19_MENU = {
     "schemaVersion": 1,
     "coupleNames": COUPLE_NAMES,
     "event": EVENT,
-    "invitationLink": INVITATION_LINK,
     "staff": STAFF,
     "requirements": REQUIREMENTS,
     "allergens": ALLERGENS,
@@ -511,10 +504,7 @@ _RESERVED19_MENU = {
             "id": "signature",
             "title": "Enjoy the evening!",
             "audience": "guest",
-            "widgets": [
-                {"type": "text", "variant": "signature", "text": COUPLE_NAMES},
-                {"type": "link"},
-            ],
+            "widgets": [{"type": "text", "variant": "signature", "text": COUPLE_NAMES}],
         },
     ],
 }

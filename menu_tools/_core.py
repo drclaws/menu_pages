@@ -161,10 +161,8 @@ check_html = _build.check_html
 check_stylesheet = _build.check_stylesheet
 check_svg = _build.check_svg
 check_base_path = _build.check_base_path
-check_allow_paths = _build.check_allow_paths
 assets_url_path = _build.assets_url_path
 base_path_argument = _build.base_path_argument
-allow_path_argument = _build.allow_path_argument
 MAX_REPORTED_PROBLEMS = _build.MAX_REPORTED_PROBLEMS
 redact_tokens = _build.redact_tokens
 display_path = _build.display_path
@@ -238,10 +236,8 @@ __all__ = [
     "check_stylesheet",
     "check_svg",
     "check_base_path",
-    "check_allow_paths",
     "assets_url_path",
     "base_path_argument",
-    "allow_path_argument",
     "MAX_REPORTED_PROBLEMS",
     "redact_tokens",
     "display_path",

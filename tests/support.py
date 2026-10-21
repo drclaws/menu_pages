@@ -87,13 +87,6 @@ def tree_digest(root: Path) -> dict[str, str]:
     }
 
 
-def allowed_path(menu: dict) -> str | None:
-    """The directory of the link back to the invitation (the first segment of
-    `invitationLink.href`), for `--allow-path`; None without a link."""
-    link = menu.get("invitationLink")
-    return "/" + link["href"].split("/")[1] if link else None
-
-
 def occurs(word: str, text: str) -> bool:
     """`word` as a whole word of `text` (not inside a longer word)."""
     return re.search(rf"(?<![A-Za-z0-9]){re.escape(word)}(?![A-Za-z0-9])", text) is not None

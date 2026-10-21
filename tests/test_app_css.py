@@ -179,6 +179,14 @@ class StyleSheetTest(unittest.TestCase):
     def test_hidden_beats_the_display_of_components(self):
         self.assertEqual(rules(self.section_code("3"))["[hidden]"], "display: none !important;")
 
+    def test_no_styles_of_link_buttons(self):
+        # the pages have no link, so no rule styles the button of one; its
+        # tokens stay in section 1, a copy of the tokens of the invitations
+        self.assertNotRegex(self.code, r"\.btn\b")
+        self.assertIn("--btn-padding-block:", self.section_code("1"))
+        header = self.raw[:self.raw.index("*/") + 2]
+        self.assertNotIn("button", header)
+
 
 class SetSwitcherStylesTest(unittest.TestCase):
     @classmethod

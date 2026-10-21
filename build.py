@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builder of personal dinner-menu pages.
 
-    python build.py build    [--data DIR] [--out DIR] [--base-path PATH] [--allow-path PATH]...
+    python build.py build    [--data DIR] [--out DIR] [--base-path PATH]
     python build.py validate [--data DIR]
     python build.py links    --url URL [--data DIR]
     python build.py token    [--prefix NAME]
@@ -21,11 +21,13 @@ the code and `favicon.svg`, generated from the design tokens of
 `assets/app.css` - nothing else.  The output is assembled next to `--out`
 (`dist` in the current directory by default) and replaces it only when every
 check has passed: nothing but the expected files, no external resources, no
-inline scripts or styles, every local URL resolves inside the output.  Its
+inline scripts or styles, every local URL resolves inside the output, and no
+file holds the token of a record (a token is only the name of the directory
+of its page).  Its
 contents are published under `--base-path` (`/` by default): every URL of the
-output starts with it.  A link (`<a href>`, `<area href>`) to a directory of
-the site that the build does not write is allowed by `--allow-path` and is not
-looked up.  Two builds of the same data are identical byte for byte.
+output starts with it, and a local address outside it is an error - the pages
+lead nowhere else on the site.  Two builds of the same data are identical
+byte for byte.
 
 `links` checks the data as `validate` does and prints the address of every
 page, `URL/<token>/` after the name of its guest record and a tab, the staff
@@ -95,13 +97,6 @@ def _base_path_type(value: str) -> str:
     return _core.base_path_argument(value)
 
 
-def _allow_path_type(value: str) -> str:
-    """One `build --allow-path`: the rule of the invitations."""
-    from menu_tools import _core
-
-    return _core.allow_path_argument(value)
-
-
 def _url_type(value: str) -> str:
     """`links --url`: an http(s) address without credentials, query or
     fragment; the trailing '/' is dropped (the rule of the invitations)."""
@@ -115,18 +110,6 @@ def _prefix_type(value: str) -> str:
     from menu_tools import _core
 
     return _core.token_prefix(value)
-
-
-def _check_build_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """`--allow-path` against `--base-path`: both are known only after the
-    parsing; a refused value is a usage error (code 2)."""
-    from menu_tools import _core
-
-    args.base_path = args.base_path or DEFAULT_BASE_PATH
-    try:
-        args.allow_paths = _core.check_allow_paths(args.allow_paths or (), args.base_path)
-    except ValueError as exc:
-        parser.error(f"argument --allow-path: {exc}")
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -157,21 +140,9 @@ def make_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         type=_base_path_type,
         help="path from the root of the site under which the contents of --out are published, "
-        "e.g. /menu: every URL of the output starts with it and a page is PATH/<token>/ "
-        f"(default: {DEFAULT_BASE_PATH})",
+        "e.g. /menu: every URL of the output starts with it, a page is PATH/<token>/ and a "
+        f"local address outside PATH is an error (default: {DEFAULT_BASE_PATH})",
     )
-    build.add_argument(
-        "--allow-path",
-        metavar="PATH",
-        dest="allow_paths",
-        action="append",
-        type=_allow_path_type,
-        help="a directory of the site that the build does not write, e.g. the invitations next "
-        "to the menu: links of the pages under it are allowed and not looked up in the output "
-        "(resources there are still errors); apart from --base-path and from the output, never "
-        "'/'; may be repeated",
-    )
-    build.set_defaults(check_arguments=lambda args: _check_build_arguments(build, args))
 
     validate = commands.add_parser("validate", help=COMMANDS["validate"], description=COMMANDS["validate"])
     add_data_option(validate)
@@ -420,7 +391,6 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
     data_dir = _data_dir(args)
     out_dir = Path(args.out) if args.out is not None else DEFAULT_OUT_DIR
     base_path = args.base_path or DEFAULT_BASE_PATH
-    allow_paths = tuple(args.allow_paths or ())
 
     def log(message: str) -> None:
         _stdout(report.redact(message))
@@ -431,11 +401,6 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
     data = load_data(data_dir, report, settings)
     pages = pages_of(data)
     tokens = [page.token for page in pages]
-    try:
-        # at the base path `/` an allowed path must not lead into a page either
-        _core.check_allow_paths(allow_paths, base_path, tokens)
-    except ValueError as exc:
-        raise _core.BuildError(f"an allowed path (--allow-path) {exc}") from None
     staff = " + staff" if data.trees.staff is not None else ""
     log(f"build: {data.index.guests} guest record(s){staff} validated (data: {_core.display_path(data_dir)})")
 
@@ -445,7 +410,9 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
         written = _core.write_pages(temporary, rendered)
         copied = _core.copy_assets(CODE_DIR / ASSETS_DIR, temporary / ASSETS_DIR)
         write_favicon(temporary / ASSETS_DIR / FAVICON_FILE, palette)
-        stats = _output.check_menu_output(temporary, tokens, base_path=base_path, allow_paths=allow_paths)
+        stats = _output.check_menu_output(
+            temporary, tokens, base_path=base_path, numbers={page.token: page.number for page in pages}
+        )
 
     out_shown = _core.display_path(out_dir)
     log(f"build: wrote {written} page(s) to {out_shown}/<token>/")
@@ -453,7 +420,6 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
         f"build: base path {base_path}: the pages are at {base_path.rstrip('/')}/<token>/, "
         f"the shared files at {_core.assets_url_path(base_path)}/"
     )
-    log(f"build: links allowed outside the output: {', '.join(allow_paths) or 'none'}")
     log(
         f"build: copied {copied} asset file(s) to {out_shown}/{ASSETS_DIR}/, "
         f"{FAVICON_FILE} generated from the design tokens"
@@ -574,9 +540,6 @@ def main(argv: list[str] | None = None) -> int:
             raise
         _stderr(f"error: {exc}")
         return EXIT_ERROR
-    check_arguments = getattr(args, "check_arguments", None)
-    if check_arguments is not None:
-        check_arguments(args)
     return run_command(COMMAND_FUNCTIONS[args.command], args)
 
 

@@ -113,8 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           python build.py validate
-          # the link back to the invitation leads to a directory of the fictional site, not built here
-          python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist"
+          python build.py build --out "$RUNNER_TEMP/dist"
 
       - name: Validate and build the set without a table
         run: |
@@ -126,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           # the layout a real site uses: the menu in a directory of the site
-          python build.py build --base-path /menu --allow-path /invite --out "$RUNNER_TEMP/site/menu"
+          python build.py build --base-path /menu --out "$RUNNER_TEMP/site/menu"
 
       - name: Check the built pages
         run: |
@@ -148,8 +147,15 @@ jobs:
                   page = (out / token / "index.html").read_text(encoding="utf-8")
                   assert not re.search(r"(?i)\sstyle\s*=", page), f"{out}: a page has a style attribute"
                   assert "{token}" not in page, f"{out}: a page has the placeholder of a token"
+                  assert not re.search(r"(?i)<a[\s/>]", page), f"{out}: a page has a link"
               assets = sorted(path.name for path in (out / "assets").iterdir())
               assert assets == ["app.css", "app.js", "favicon.svg"], f"{out}/assets: {assets}"
+              # a token is the name of the directory of its page and nothing else
+              lowered = [token.lower() for token in tokens]
+              for path in sorted(out.rglob("*")):
+                  if path.is_file():
+                      text = path.read_text(encoding="utf-8").lower()
+                      assert not any(token in text for token in lowered), f"{out}: a file holds the token of a record"
               assert len(staff) == 1, f"{data}: no staff record"
               page = (out / staff[0] / "index.html").read_text(encoding="utf-8")
               assert '<meta name="robots" content="noindex, nofollow">' in page, f"{out}: the staff page has no robots tag"
@@ -159,7 +165,7 @@ jobs:
       - name: Reproducible build
         run: |
           set -euo pipefail
-          python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist2"
+          python build.py build --out "$RUNNER_TEMP/dist2"
           tree_hash() {
             (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
           }

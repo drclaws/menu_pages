@@ -49,14 +49,14 @@ STEP_NAMES = [
 BUILD_COMMANDS = {
     BUILD_MAIN: [
         "python build.py validate",
-        'python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist"',
+        'python build.py build --out "$RUNNER_TEMP/dist"',
     ],
     BUILD_PLAIN: [
         "python build.py validate --data examples/data-plain",
         'python build.py build --data examples/data-plain --out "$RUNNER_TEMP/dist-plain"',
     ],
     BUILD_BASE_PATH: [
-        'python build.py build --base-path /menu --allow-path /invite --out "$RUNNER_TEMP/site/menu"',
+        'python build.py build --base-path /menu --out "$RUNNER_TEMP/site/menu"',
     ],
 }
 
@@ -438,8 +438,8 @@ class CiWorkflowTest(unittest.TestCase):
         for name, expected in BUILD_COMMANDS.items():
             with self.subTest(step=name):
                 self.assertEqual(commands(self.named[name]), expected)
-        # the main set is built with the link back to the invitation allowed,
-        # once at the top of a site and once under the base path of a real site
+        # the main set is built once at the top of a site and once under the
+        # base path of a real site; every build writes to the runner's directory
         builds = [line for block in self.named.values() for line in commands(block)
                   if line.startswith("python build.py build")]
         self.assertTrue(all("--out \"$RUNNER_TEMP/" in line for line in builds), builds)
@@ -463,7 +463,6 @@ class CiWorkflowTest(unittest.TestCase):
             for data, out in CHECKED_BUILDS:
                 target = work / out.replace("$RUNNER_TEMP/", "")
                 extra = ["--base-path", "/menu"] if "/site/" in out else []
-                extra += ["--allow-path", "/invite"] if data == "examples/data" else []
                 if not target.exists():
                     result = support.run_main("build", "--data", ROOT / data, "--out", target, *extra)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -478,16 +477,30 @@ class CiWorkflowTest(unittest.TestCase):
             self.assertEqual(len(passed.stdout.splitlines()), 3)
             self.assertTrue(all(line.startswith("OK: ") for line in passed.stdout.splitlines()))
             page = next((work / "dist-plain").glob("*/index.html"))
+            token = page.parent.name
             original = page.read_text(encoding="utf-8")
             broken = {
                 "a style attribute": original.replace("<main ", '<main style="margin: 0" ', 1),
                 "a placeholder": original.replace("</main>", "<p>{token}</p></main>", 1),
+                "a link": original.replace("</main>", '<p><a href="/other/">Other</a></p></main>', 1),
+                "the own token": original.replace("</main>", f"<p>{token.upper()}</p></main>", 1),
             }
             for name, text in broken.items():
                 with self.subTest(case=name):
                     page.write_text(text, encoding="utf-8")
-                    self.assertNotEqual(check().returncode, 0)
+                    failed = check()
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertNotIn(token.lower(), (failed.stdout + failed.stderr).lower())
             page.write_text(original, encoding="utf-8")
+            style_sheet = work / "dist-plain" / "assets" / "app.css"
+            css = style_sheet.read_text(encoding="utf-8")
+            with self.subTest(case="a token in the shared files"):
+                style_sheet.write_text(f"{css}/* {token} */\n", encoding="utf-8")
+                failed = check()
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertNotIn(token.lower(), (failed.stdout + failed.stderr).lower())
+            style_sheet.write_text(css, encoding="utf-8")
+            self.assertEqual(check().returncode, 0)
             (work / "dist-plain" / "assets" / "extra.css").write_text("", encoding="utf-8")
             self.assertNotEqual(check().returncode, 0)
 

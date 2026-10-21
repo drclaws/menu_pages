@@ -32,18 +32,12 @@ WARNINGS = {
 STYLE_PROBLEM = "the attribute 'style' is not allowed (the styles live in assets/app.css)"
 
 
-def allow_args(menu: dict) -> list[str]:
-    path = support.allowed_path(menu)
-    return ["--allow-path", path] if path else []
-
-
 class BuildTestCase(support.TempDirTestCase):
     def write(self, name: str, menu: dict, guests: list) -> Path:
         return fixtures.write_data(self.tmp / "data" / name, menu, guests)
 
-    def build(self, data: Path, out: Path, *extra: str, menu: dict | None = None):
-        allow = allow_args(menu) if menu is not None else []
-        return support.run_main("build", "--data", data, "--out", out, *allow, *extra)
+    def build(self, data: Path, out: Path, *extra: str):
+        return support.run_main("build", "--data", data, "--out", out, *extra)
 
     def assert_quiet_about(self, result, menu: dict, guests: list) -> None:
         """No token, name or traceback in what the command printed, and every
@@ -78,12 +72,10 @@ class FullBuildTest(BuildTestCase):
                 menu, guests = make()
                 data = self.write(name, menu, guests)
                 first, second = self.tmp / f"{name}-main", self.tmp / f"{name}-script"
-                result = self.build(data, first, menu=menu)
+                result = self.build(data, first)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr, WARNINGS[name])
-                script = support.run_script(
-                    "build", "--data", data, "--out", second, *allow_args(menu), cwd=work
-                )
+                script = support.run_script("build", "--data", data, "--out", second, cwd=work)
                 self.assertEqual(script.returncode, 0, script.stderr)
                 self.assertEqual(script.stderr, WARNINGS[name])
                 for done, out in ((result, first), (script, second)):
@@ -102,7 +94,7 @@ class FullBuildTest(BuildTestCase):
         menu, guests = fixtures.reserved19()
         data = self.write("reserved19", menu, guests)
         out = self.tmp / "site" / "menu"
-        result = self.build(data, out, "--base-path", "/menu", menu=menu)
+        result = self.build(data, out, "--base-path", "/menu")
         self.assertEqual(result.returncode, 0, result.stderr)
         shown = _core.display_path(out)
         lines = result.stdout.splitlines()
@@ -112,17 +104,10 @@ class FullBuildTest(BuildTestCase):
                 f"build: 12 guest record(s) + staff validated (data: {_core.display_path(data)})",
                 f"build: wrote 13 page(s) to {shown}/<token>/",
                 "build: base path /menu: the pages are at /menu/<token>/, the shared files at /menu/assets/",
-                f"build: links allowed outside the output: {support.allowed_path(menu)}",
                 f"build: copied 2 asset file(s) to {shown}/assets/, favicon.svg generated from the design tokens",
             ],
         )
         self.assertRegex(lines[-1], rf"^build: OK -> {re.escape(shown)} \(13 page\(s\), 16 file\(s\) in total, ")
-
-    def test_without_a_link_back_nothing_is_allowed(self):
-        menu, guests = fixtures.plain()
-        result = self.build(self.write("plain", menu, guests), self.tmp / "out", menu=menu)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("build: links allowed outside the output: none\n", result.stdout)
 
     def test_the_addresses_follow_the_base_path(self):
         menu, guests = fixtures.reserved19()
@@ -130,7 +115,7 @@ class FullBuildTest(BuildTestCase):
         for base, prefix in (("/", ""), ("/menu", "/menu"), ("/a/b/", "/a/b")):
             with self.subTest(base=base):
                 out = self.tmp / f"out{prefix.replace('/', '-')}"
-                result = self.build(data, out, "--base-path", base, menu=menu)
+                result = self.build(data, out, "--base-path", base)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 page = (out / guests[0]["token"] / "index.html").read_text(encoding="utf-8")
                 self.assertIn(f'<link rel="stylesheet" href="{prefix}/assets/app.css">', page)
@@ -146,7 +131,7 @@ class FullBuildTest(BuildTestCase):
         data = self.write("reserved19", menu, guests)
         digests = []
         for out in (self.tmp / "one", self.tmp / "two"):
-            result = self.build(data, out, "--base-path", "/menu", menu=menu)
+            result = self.build(data, out, "--base-path", "/menu")
             self.assertEqual(result.returncode, 0, result.stderr)
             digests.append(support.tree_digest(out))
         self.assertEqual(digests[0], digests[1])
@@ -156,12 +141,12 @@ class FullBuildTest(BuildTestCase):
         menu, guests = fixtures.mockup16()
         data = self.write("mockup16", menu, guests)
         out = self.tmp / "dist"
-        self.assertEqual(self.build(data, out, menu=menu).returncode, 0)
+        self.assertEqual(self.build(data, out).returncode, 0)
         before = support.tree_digest(out)
         # a record is gone: its page is gone as well
         del guests[3]
         fixtures.write_data(data, menu, guests)
-        result = self.build(data, out, menu=menu)
+        result = self.build(data, out)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_layout(out, guests)
         self.assertNotEqual(support.tree_digest(out), before)
@@ -175,7 +160,7 @@ class FullBuildTest(BuildTestCase):
         for path in stale:
             (path / guests[0]["token"]).mkdir(parents=True)
             (path / guests[0]["token"] / "index.html").write_text("<p>old</p>", encoding="utf-8")
-        result = self.build(data, out, menu=menu)
+        result = self.build(data, out)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.leftovers(out), [])
         self.assertNotIn(guests[0]["token"], result.stdout + result.stderr)
@@ -188,7 +173,7 @@ class RefusalTest(BuildTestCase):
         self.data = self.write("reserved19", self.menu, self.guests)
 
     def refused(self, out: Path, message: str):
-        result = self.build(self.data, out, menu=self.menu)
+        result = self.build(self.data, out)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, f"error: {message}\nbuild: failed\n")
@@ -238,7 +223,7 @@ class FailingBuildTest(BuildTestCase):
         self.menu, self.guests = fixtures.reserved19()
         self.data = self.write("reserved19", self.menu, self.guests)
         self.out = self.tmp / "dist"
-        result = self.build(self.data, self.out, menu=self.menu)
+        result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.before = support.tree_digest(self.out)
 
@@ -264,7 +249,7 @@ class FailingBuildTest(BuildTestCase):
             return render_page(template, tree).replace("<main ", '<main style="margin: 0" ', 1)
 
         with mock.patch.object(build, "render_page", with_style):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout.splitlines(), ["build: 12 guest record(s) + staff validated "
                                                       f"(data: {_core.display_path(self.data)})"])
@@ -283,7 +268,7 @@ class FailingBuildTest(BuildTestCase):
         code = self.code_with_template("<p>{{noSuchField}}</p>")
         line = (code / "template.html").read_text(encoding="utf-8").splitlines().index("<p>{{noSuchField}}</p>") + 1
         with mock.patch.object(build, "CODE_DIR", code):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stderr.splitlines(),
@@ -299,7 +284,7 @@ class FailingBuildTest(BuildTestCase):
     def test_a_template_problem_on_one_page_names_its_record(self):
         code = self.code_with_template("<!-- if:isStaff --><p>{{noSuchField}}</p><!-- endif -->")
         with mock.patch.object(build, "CODE_DIR", code):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         lines = result.stderr.splitlines()
         self.assertEqual(len(lines), 2, lines)
@@ -312,7 +297,7 @@ class FailingBuildTest(BuildTestCase):
         self.guests[5]["seats"][0]["requirements"] = ["nutz"]
         self.guests[12]["name"] = "Someone"
         fixtures.write_data(self.data, self.menu, self.guests)
-        result = self.build(self.data, self.out, menu=self.menu)
+        result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         lines = result.stderr.splitlines()
@@ -325,36 +310,75 @@ class FailingBuildTest(BuildTestCase):
         self.assert_quiet_about(result, self.menu, self.guests)
         self.assert_kept()
 
-    def test_a_refused_allowed_path_after_the_data_is_read(self):
-        result = self.build(self.data, self.out, "--allow-path", f"/{self.guests[0]['token'].upper()}")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            result.stderr,
-            "error: an allowed path (--allow-path) must not lead into the directory of a page of the output: "
-            "the addresses there are files of the output and are checked against them\nbuild: failed\n",
-        )
-        self.assert_quiet_about(result, self.menu, self.guests)
-        self.assert_kept()
+    def test_a_link_outside_the_output_fails(self):
+        # a page that leads to another part of the site, rendered by a broken
+        # template: under the base path /menu the address lies outside the
+        # output, at the top of the site it names no file of the output
+        render_page = build.render_page
 
-    def test_a_link_outside_the_output_without_an_allowed_path(self):
+        def with_link(template, tree):
+            return render_page(template, tree).replace("</main>", '<p><a href="/other/x/">Other</a></p>\n</main>', 1)
+
         for base, words in (("/menu", "points outside the output"), ("/", "does not exist in the output")):
             with self.subTest(base=base):
-                result = support.run_main("build", "--data", self.data, "--out", self.out, "--base-path", base)
+                with mock.patch.object(build, "render_page", with_link):
+                    result = self.build(self.data, self.out, "--base-path", base)
                 self.assertEqual(result.returncode, 1)
                 lines = result.stderr.splitlines()
                 self.assertEqual(len(lines), 2, lines)
-                self.assertRegex(lines[0], rf"^error: 12 files: <a href>: '/…' {words}; first: …/index\.html line \d+$")
+                self.assertRegex(lines[0], rf"^error: 13 files: <a href>: '/…' {words}; first: …/index\.html line \d+$")
+                self.assertEqual(lines[1], "build: failed with 1 error(s)")
                 self.assert_quiet_about(result, self.menu, self.guests)
+                self.assert_kept()
+
+    def test_a_token_written_into_the_data_fails(self):
+        # a token typed into a text by mistake reads as a word to the checks
+        # of the data; the check of the output finds it in any letter case
+        tokens = [record["token"] for record in self.guests]
+
+        def shared_text(menu, guests):
+            # the card of the main course, on every guest page but the one that hides it
+            menu["sections"][3]["widgets"][1]["text"] += f" Ask for {tokens[1]}."
+
+        def note_to_a_guest(menu, guests):
+            guests[3]["sections"] = {"signature": {"note": f"Your page: {tokens[3]}"}}
+
+        def staff_reminder(menu, guests):
+            menu["staff"]["reminder"] = f"The seat plan of {tokens[4].upper()} is final."
+
+        cases = {
+            "the shared text": (shared_text, "guests.json: guest #2: its token is in 11 files of the output, "
+                                             "first: …/index.html"),
+            "the note to a guest": (note_to_a_guest, "guests.json: guest #4: its token is in …/index.html"),
+            "the staff reminder": (staff_reminder, "guests.json: guest #5: its token is in …/index.html"),
+        }
+        for name, (change, problem) in cases.items():
+            with self.subTest(case=name):
+                menu, guests = fixtures.reserved19()
+                change(menu, guests)
+                data = self.write(name.replace(" ", "-"), menu, guests)
+                self.assertEqual(support.run_main("validate", "--data", data).returncode, 0)
+                fresh = self.tmp / f"fresh-{name.replace(' ', '-')}"
+                for out in (self.out, fresh):
+                    result = self.build(data, out, "--base-path", "/menu")
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout.splitlines(), [
+                        f"build: 12 guest record(s) + staff validated (data: {_core.display_path(data)})"])
+                    self.assertEqual(result.stderr, f"error: {problem}; a token is only the name of the "
+                                                    "directory of its page\nbuild: failed with 1 error(s)\n")
+                    self.assert_quiet_about(result, menu, guests)
+                self.assertFalse(fresh.exists())
+                self.assertEqual(self.leftovers(fresh), [])
                 self.assert_kept()
 
     def test_a_file_system_error_names_the_file_only_once_the_tokens_are_known(self):
         token = self.guests[0]["token"]
         failure = OSError(13, "Permission denied", str(self.out / token / "index.html"))
         with mock.patch.object(build, "check_out", side_effect=failure):
-            early = self.build(self.data, self.out, menu=self.menu)
+            early = self.build(self.data, self.out)
         self.assertEqual(early.stderr, "error: Permission denied\nbuild: failed\n")
         with mock.patch.object(_core, "write_pages", side_effect=failure):
-            late = self.build(self.data, self.out, menu=self.menu)
+            late = self.build(self.data, self.out)
         self.assertEqual(
             late.stderr.splitlines(),
             [f"error: Permission denied: {_core.display_path(self.out)}/…/index.html", "build: failed"],
@@ -368,7 +392,7 @@ class FailingBuildTest(BuildTestCase):
         code = self.code_with_template("")
         (code / "assets" / "Favicon.svg").write_text("<svg></svg>", encoding="utf-8")
         with mock.patch.object(build, "CODE_DIR", code):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(
             result.stderr,
             "error: assets/Favicon.svg of the code collides with the icon that the build generates from "
@@ -380,7 +404,7 @@ class FailingBuildTest(BuildTestCase):
         code = self.code_with_template("")
         (code / "assets" / "notes.txt").write_text("a note of the code", encoding="utf-8")
         with mock.patch.object(build, "CODE_DIR", code):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stderr,
@@ -395,7 +419,7 @@ class FailingBuildTest(BuildTestCase):
         css = (code / "assets" / "app.css").read_text(encoding="utf-8")
         (code / "assets" / "app.css").write_text(css.replace("--color-surface:", "--color-surfaces:", 1), encoding="utf-8")
         with mock.patch.object(build, "CODE_DIR", code):
-            result = self.build(self.data, self.out, menu=self.menu)
+            result = self.build(self.data, self.out)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stderr,

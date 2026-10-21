@@ -6,13 +6,12 @@ other records, every `staff` key, the requirements and allergens, the
 sections and widgets for the staff only, the dish for the staff only, the
 names and dietary notes of the seats, which seats are taken and which are
 reserved) and expects the very same tree of
-every guest.  The string test looks for those values in the trees; the
-structure tests check the fields a guest tree leaves empty and the code of
-the guest page for the keys it may not read.
+every guest.  The string tests look for those values, and for every token
+(the own one too), in the trees; the structure tests check the fields a guest
+tree leaves empty and the code of the guest page for the keys it may not read.
 """
 
 import ast
-import copy
 import inspect
 import json
 import re
@@ -291,15 +290,15 @@ class StringsTest(unittest.TestCase):
                         self.assertFalse(occurs(value, text), "a value a guest must not see")
         self.assertGreater(checked, 500)
 
-    def test_the_own_token_is_only_in_the_link(self):
-        menu, guests = fixtures.reserved19()
-        for page in build(menu, guests).guests:
-            tree = copy.deepcopy(page.tree)
-            links = [w for s in tree["sections"] for w in s["widgets"] if w["type"] == "link"]
-            self.assertEqual([link["href"] for link in links], [f"/invite/{page.token}/"])
-            for link in links:
-                link["href"] = ""
-            self.assertNotIn(page.token, dump(tree))
+    def test_a_guest_tree_holds_no_token(self):
+        # not even its own: the token names the directory of the page alone
+        for name, make in fixtures.SETS.items():
+            menu, guests = make()
+            for page in build(menu, guests).guests:
+                text = dump(page.tree).lower()
+                for token in fixtures.tokens(guests):
+                    with self.subTest(fixture=name, record=page.number, own=token == page.token):
+                        self.assertNotIn(token.lower(), text)
 
     def test_the_staff_tree_has_every_name_and_no_token_nor_note(self):
         for name, make in fixtures.SETS.items():
@@ -361,7 +360,6 @@ class StructureTest(unittest.TestCase):
                 for item in tree["sections"]:
                     self.assertEqual(item["note"], "")
                     for widget in item["widgets"]:
-                        self.assertNotEqual(widget["type"], "link")
                         if widget["type"] == "seating":
                             self.assertEqual((widget["mySeats"], widget["seatLabel"], widget["whoLabel"]), ([], "", ""))
                             if widget["scheme"] is not None:
@@ -391,7 +389,8 @@ class StructureTest(unittest.TestCase):
                     if record.get("staff") is not True:
                         walk(_page.own_record(record))
                 self.assertFalse(
-                    keys & {"staff", "requirements", "allergens", "members", "role", "audience", "tag", "letter"}
+                    keys & {"token", "staff", "requirements", "allergens", "members", "role", "audience", "tag",
+                            "letter"}
                 )
                 # no name of a seat: the own record keeps only the name of the record
                 for record in guests:
@@ -404,7 +403,7 @@ class StructureTest(unittest.TestCase):
 
     def test_the_guest_page_code_reads_no_private_key(self):
         # the code that builds a guest page never reads these keys
-        private = {"staff", "requirements", "allergens", "members", "role", "audience", "tag", "letter"}
+        private = {"token", "staff", "requirements", "allergens", "members", "role", "audience", "tag", "letter"}
         allowed = {
             # `public_menu` leaves the parts for the staff only out by their audience
             ("public_menu", "audience"),

@@ -3,6 +3,7 @@
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import build  # noqa: E402  (imported after sys.path is prepared)
-from tests import fixtures, support  # noqa: E402
+from tests import fixtures  # noqa: E402
 
 SCRIPT = ROOT / "build.py"
 
@@ -101,14 +102,19 @@ class CliTest(unittest.TestCase):
         self.assertIn("usage:", result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_build_takes_the_data_the_output_and_the_paths(self):
+    def test_build_takes_the_data_the_output_and_the_base_path(self):
         result = run_main("build", "--help")
         self.assertEqual(result.returncode, 0)
-        for option in ("--data DIR", "--out DIR", "--base-path PATH", "--allow-path PATH"):
+        for option in ("--data DIR", "--out DIR", "--base-path PATH"):
             self.assertIn(option, result.stdout)
-        result = run_main("build", "--media", "media")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("unrecognized arguments", result.stderr)
+        self.assertEqual(re.findall(r"(?m)^  (--[\w-]+)", result.stdout), ["--data", "--out", "--base-path"])
+        # no media, and no directory of the site outside the output to link to
+        for extra in (("--media", "media"), ("--allow-path", "/other")):
+            with self.subTest(extra=extra):
+                result = run_main("build", *extra)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(f"unrecognized arguments: {' '.join(extra)}", result.stderr)
 
     def test_validate_takes_the_data_directory_only(self):
         result = run_main("validate", "--out", "dist")
@@ -144,7 +150,6 @@ class CliTest(unittest.TestCase):
             base = Path(temporary).resolve()
             menu, guests = fixtures.reserved19()
             data = fixtures.write_data(base / "data", menu, guests)
-            allowed = support.allowed_path(menu)
             work = base / "work"
             work.mkdir()
             out = base / "out"
@@ -152,7 +157,7 @@ class CliTest(unittest.TestCase):
                 ("--help",),
                 (),
                 ("build", "--data", str(base / "nowhere"), "--out", str(out)),
-                ("build", "--data", str(data), "--out", str(out), "--allow-path", allowed),
+                ("build", "--data", str(data), "--out", str(out)),
                 ("validate", "--data", str(data)),
                 ("token", "--prefix", "a b"),
                 ("links", "--url", "ftp://example.org/menu", "--data", str(data)),
@@ -224,7 +229,7 @@ class TokenTest(unittest.TestCase):
 
 
 class BuildArgumentsTest(unittest.TestCase):
-    """`--base-path` and `--allow-path` are checked before anything is read."""
+    """`--base-path` is checked before anything is read."""
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="menu-build-test-")
@@ -234,38 +239,18 @@ class BuildArgumentsTest(unittest.TestCase):
         self.args = ("build", "--data", str(self.base / "nowhere"), "--out", str(self.base / "out"))
 
     def test_each_refused_value_is_a_usage_error_that_does_not_repeat_it(self):
-        cases = (
-            (("--allow-path", "/"), "--allow-path", "must not be '/'"),
-            (("--base-path", "/menu", "--allow-path", "/menu"), "--allow-path", "must not be the --base-path"),
-            (("--base-path", "/menu", "--allow-path", "/menu/wendell"), "--allow-path", "must not lie under the --base-path"),
-            (("--base-path", "/judy/x", "--allow-path", "/judy"), "--allow-path", "must not contain the --base-path"),
-            (("--allow-path", "/bjarne/../x"), "--allow-path", "must be a path from the root of the site"),
-            (("--allow-path", "rosalind"), "--allow-path", "must be a path from the root of the site"),
-            (("--base-path", "https://leopold.example.org/x"), "--base-path", "must be a path from the root of the site"),
-            (("--allow-path", "/ok", "--allow-path", "/a b"), "--allow-path", "must be a path from the root of the site"),
-        )
-        for extra, option, problem in cases:
-            with self.subTest(extra=extra):
-                result = run_main(*self.args, *extra)
+        for value in ("https://leopold.example.org/x", "/bjarne/../x", "rosalind", "/judy path"):
+            with self.subTest(value=value):
+                result = run_main(*self.args, "--base-path", value)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertEqual(result.stdout, "")
                 self.assertIn("usage: build.py build", result.stderr)
-                self.assertIn(f"build.py build: error: argument {option}: {problem}", result.stderr)
-                for value in extra[1::2]:
-                    if value != "/":
-                        self.assertNotIn(value, result.stderr)
-                for word in ("wendell", "judy", "bjarne", "rosalind", "leopold"):
+                self.assertIn("build.py build: error: argument --base-path: must be a path from the root "
+                              "of the site", result.stderr)
+                self.assertNotIn(value, result.stderr)
+                for word in ("judy", "bjarne", "rosalind", "leopold"):
                     self.assertNotIn(word, result.stderr)
                 self.assertFalse((self.base / "out").exists())
-
-    def test_the_allowed_paths_may_be_repeated(self):
-        menu, guests = fixtures.reserved19()
-        data = fixtures.write_data(self.base / "data", menu, guests)
-        allowed = support.allowed_path(menu)
-        result = run_main("build", "--data", str(data), "--out", str(self.base / "out"),
-                          "--allow-path", allowed, "--allow-path", "/other/", "--allow-path", allowed + "/")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"build: links allowed outside the output: {allowed}, /other\n", result.stdout)
 
 
 class ValidateTest(unittest.TestCase):

@@ -14,14 +14,17 @@ cannot drift from the contract.
 The data is fictional and follows the design of the pages: the dinner of
 Ivan & Vera at a bistro, an L-shaped table of sixteen seats.  The trees:
 
-* `guest_plus_one` - Olga with her +1 at seats 8 and 9; the menu has a table,
-  the scheme is `None` (the page reads the same without a drawing);
+* `guest_plus_one` - Olga with her +1 at seats 8 and 9, marked on the plan of
+  the table with "You" and "+1";
 * `guest_without_table` - Klara at seat 1 of a menu without a table, with
   three sets and one line of drinks;
 * `guest_pair` - Peggy and Victor, one record with two named seats, one set;
-* `staff` - the staff page: the legend, every seat (a free and a reserved one
-  among them, a +1 with a name and one without), the swaps, a dish for the
-  staff only, the notes for the staff.
+  the menu has a table, but the widget shows no plan (the scheme is `None`:
+  the page reads the same without a drawing);
+* `staff` - the staff page: the legend, the plan with the badges of the
+  dietary notes, every seat (a free and a reserved one among them, a +1 with
+  a name and one without), the swaps, a dish for the staff only, the notes
+  for the staff.
 """
 
 from __future__ import annotations
@@ -189,10 +192,10 @@ def dishes(entries: tuple, staff_page: bool) -> list[dict]:
             for name, ingredients, extra in entries]
 
 
-def seating(section_id: str, *, my_seats: tuple = (), seat_label: str = "",
-            who_label: str = "", legend: tuple = (), rows: tuple = (),
+def seating(section_id: str, *, scheme: dict | None = None, my_seats: tuple = (),
+            seat_label: str = "", who_label: str = "", legend: tuple = (), rows: tuple = (),
             footnote: str = "") -> dict:
-    return widget("seating", section_id, 1, scheme=None,
+    return widget("seating", section_id, 1, scheme=scheme,
                   mySeats=[node("mySeat", number=number, mark=mark) for number, mark in my_seats],
                   seatLabel=seat_label, whoLabel=who_label,
                   legend=[node("legend", letter=letter, label=label) for letter, label in legend],
@@ -320,6 +323,50 @@ def signature(link_href: str, note: str = "") -> dict:
     ])
 
 
+# --- the plan of the table -------------------------------------------------------
+
+TABLE_LABEL = "L-shaped table"
+#: The outline of the two arms and the centres of the sixteen seats, in the
+#: units of the 318 x 310 field, as the geometry lays out the table.
+TABLE_OUTLINE = ("M50 60L230 60A10 10 0 0 1 240 70L240 250A10 10 0 0 1 230 260L198 260"
+                 "A10 10 0 0 1 188 250L188 112L50 112A10 10 0 0 1 40 102L40 70"
+                 "A10 10 0 0 1 50 60Z")
+SEAT_CENTRES = ((18, 86), (56, 38), (98, 38), (140, 38), (182, 38), (224, 38), (262, 97),
+                (262, 139), (262, 181), (262, 223), (214, 282), (166, 218), (166, 176),
+                (145, 134), (103, 134), (61, 134))
+COUPLE_SEATS = (4, 5)
+#: The couple label inside the top arm: the names in capitals, as the build
+#: writes them.
+COUPLE_LABEL = COUPLE.replace("&", "·").upper()
+
+
+def scheme(*, staff_page: bool, own: tuple = (), mine: str = "", flagged: tuple = (),
+           badges: tuple = (), labels: tuple = ()) -> dict:
+    """The plan of the L-shaped table for a page, every number a string.
+
+    `own` are the guest's seats, `flagged` the seats with a dietary note;
+    `badges` are (letter, cx, cy), `labels` (is you, is +1, x, y, anchor).
+    """
+    seats = []
+    for number, (cx, cy) in enumerate(SEAT_CENTRES, start=1):
+        kind = "you" if number in own else "couple" if number in COUPLE_SEATS else "regular"
+        mark = "flagged" if number in flagged else "none"
+        radius = "16.25" if kind == "you" else "13.75" if mark == "flagged" else "14.25"
+        seats.append(node("schemeSeat", number=str(number), cx=str(cx), cy=str(cy), r=radius,
+                          kind=kind, mark=mark, ring=kind == "you", ringR="21"))
+    return node(
+        "scheme", width="318", height="310", hidden=staff_page, tableLabel=TABLE_LABEL,
+        total=str(len(SEAT_CENTRES)), mine=mine, single=len(own) == 1, outline=TABLE_OUTLINE,
+        couple=node("schemeCouple", text=COUPLE_LABEL, x="114", y="86", vertical=False),
+        seats=seats,
+        badges=[node("schemeBadge", letter=letter, cx=str(cx), cy=str(cy), r="9")
+                for letter, cx, cy in badges],
+        labels=[node("schemeLabel", isYou=is_you, isPlusOne=is_plus_one, x=str(x), y=str(y),
+                     anchor=anchor)
+                for is_you, is_plus_one, x, y, anchor in labels],
+    )
+
+
 # --- the trees -------------------------------------------------------------------
 
 def guest_plus_one() -> dict:
@@ -327,7 +374,11 @@ def guest_plus_one() -> dict:
     return root(staff_page=False, sections=[
         cover(),
         section("seats", "Your seats", widgets=[seating(
-            "seats", my_seats=((8, "you"), (9, "plusOne")), seat_label="Seats 8 & 9",
+            "seats",
+            scheme=scheme(staff_page=False, own=(8, 9), mine="8 and 9",
+                          labels=((True, False, 283, 139, "start"),
+                                  (False, True, 283, 181, "start"))),
+            my_seats=((8, "you"), (9, "plusOne")), seat_label="Seats 8 & 9",
             who_label="Olga and your guest")]),
         section("starters", "Starters", "Shared plates for the table", widgets=[
             widget("dishes", "starters", 1, title="", items=dishes(STARTERS, False))]),
@@ -408,11 +459,15 @@ def staff() -> dict:
                    reminder="Staff link only — please do not show this page to guests.\n\n"
                             "Print it on the morning of the dinner."),
         counters=node("counters", guests=14, notes=5, guestsText="14 guests",
-                      notesText="5 dietary notes", tableLabel="L-shaped table"),
+                      notesText="5 dietary notes", tableLabel=TABLE_LABEL),
         sections=[
             cover(),
             section("seats", "Seating and dietary notes", widgets=[seating(
-                "seats", legend=LEGEND, rows=rows,
+                "seats",
+                scheme=scheme(staff_page=True, flagged=(1, 3, 7, 10, 14),
+                              badges=(("A", 30, 74), ("N", 110, 26), ("V", 274, 85),
+                                      ("G", 250, 211), ("L", 274, 211), ("L", 157, 122))),
+                legend=LEGEND, rows=rows,
                 footnote="Main course: every guest picks Set A or Set B at the table — take "
                          "the orders after the starters are served.")]),
             section("starters", "Starters", "Shared plates · on the table by 19:15", widgets=[
@@ -441,28 +496,3 @@ TREES = {
 def all_trees() -> dict[str, dict]:
     """A fresh copy of every tree, by name."""
     return {name: build() for name, build in TREES.items()}
-
-
-def scheme_example(staff_page: bool) -> dict:
-    """A scheme object of the contract, for the tests that hand one to a page.
-
-    Two seats of the table, coordinates as strings: the guest's version has
-    the ring and the label of the own seat, the staff version a badge.
-    """
-    you = not staff_page
-    return node(
-        "scheme", width="318", height="310", hidden=staff_page, tableLabel="L-shaped table",
-        total="16", mine="" if staff_page else "8", single=you,
-        outline="M50 60L230 60A10 10 0 0 1 240 70L240 250L50 250Z",
-        couple=node("schemeCouple", text="IVAN · VERA", x="114", y="86", vertical=False),
-        seats=[
-            node("schemeSeat", number="7", cx="262", cy="100", r="13.75" if staff_page else "14.25",
-                 kind="regular", mark="flagged" if staff_page else "none", ring=False, ringR=""),
-            node("schemeSeat", number="8", cx="262", cy="142", r="14.25" if staff_page else "16.25",
-                 kind="regular" if staff_page else "you", mark="none", ring=you,
-                 ringR="21" if you else ""),
-        ],
-        badges=[node("schemeBadge", letter="V", cx="274", cy="88", r="9")] if staff_page else [],
-        labels=[] if staff_page else [
-            node("schemeLabel", isYou=True, isPlusOne=False, x="283", y="142", anchor="start")],
-    )

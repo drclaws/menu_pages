@@ -49,7 +49,7 @@ ALLERGENS = {
 
 #: The texts of the staff, the same in every set.
 STAFF = {
-    "updated": "updated 12 June 2030",
+    "updated": "12 June 2030",
     "contact": "Selma (wedding planner) · +00 000 000 00 00",
     "reminder": "Staff link only — please do not show this page to guests.",
 }
@@ -571,7 +571,7 @@ _PLAIN_MENU = {
     "schemaVersion": 1,
     "coupleNames": COUPLE_NAMES,
     "event": EVENT,
-    "staff": {"updated": "updated 1 June 2030", "contact": "Selma (wedding planner), phone on the event sheet"},
+    "staff": {"updated": "1 June 2030", "contact": "Selma (wedding planner), phone on the event sheet"},
     "dishes": {
         "bread": {"name": "Bread and butter", "ingredients": "Sourdough, salted butter"},
         "salad": {"name": "Garden salad", "ingredients": "Leaves, radish, mustard dressing"},

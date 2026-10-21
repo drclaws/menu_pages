@@ -300,6 +300,21 @@ class MenuStylesTest(unittest.TestCase):
         # both: with `break-after` alone a browser splits the eyebrow from the title
         self.assertEqual(self.print[".section__head"], "break-inside: avoid; break-after: avoid;")
 
+    def test_print_drops_the_shadows_of_the_cards(self):
+        # a browser prints the blur of a rounded card as a grey rectangle
+        self.assertEqual(self.print[".card, .text-widget--card"], "box-shadow: none;")
+
+    def test_print_never_splits_a_dish_a_drink_or_the_staff_footer(self):
+        self.assertEqual(
+            self.print[".dish, .drink, .schedule__item, .drinks__group--inline, .staff-footer"],
+            "break-inside: avoid;",
+        )
+
+    def test_print_of_the_staff_footer_is_compact(self):
+        # as compact as the sections of the staff page
+        self.assertEqual(self.print[".menu--staff .page-footer"], self.print[".menu--staff .section"])
+        self.assertEqual(self.print[".menu--staff .page-footer"], "margin-block: var(--space-md);")
+
 
 def declarations(body: str) -> dict[str, str]:
     """{property: value} of a rule body as `rules()` gives it."""

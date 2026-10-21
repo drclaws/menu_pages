@@ -480,13 +480,15 @@
   --color-couple-line: var(--color-text);
 
   /* Table scheme: seat and flag borders, the ring of the guest's own seat,
-     the field (318 x 310 units) and how close it may come to the card edge. */
+     the field (318 x 310 units) and how close it may come to the card edge:
+     the ring of a guest's seat may reach 4 units past the field, so the gap
+     is a little wider and the ring never touches the border of the card. */
   --line-width-seat: 1.5px;
   --line-width-flag: 2.5px;
   --seat-ring-opacity: 0.22;
   --seating-width: 318px;
   --seating-ratio: 318 / 310;
-  --seating-bleed-gap: 4px;
+  --seating-bleed-gap: 5px;
   --scheme-font-number: 12px;
   --scheme-font-number-you: 13px;
   --scheme-font-label: 12px;

@@ -288,7 +288,8 @@ class MenuStylesTest(unittest.TestCase):
                          "/ var(--text-base-mobile));")
 
     def test_print_keeps_the_background_colours_of_flags_and_labels(self):
-        self.assertEqual(self.print[".legend__mark, .pill, .time-label--strong, .staff-bar"],
+        self.assertEqual(self.print[".legend__mark, .pill, .seat-number--couple, "
+                                    ".time-label--strong, .staff-bar"],
                          "-webkit-print-color-adjust: exact; print-color-adjust: exact;")
 
     def test_print_of_the_staff_page_is_compact(self):

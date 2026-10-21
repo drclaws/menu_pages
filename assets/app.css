@@ -1803,9 +1803,10 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   /* Colours that are backgrounds: a browser leaves them out of print by
      default, and the white letter of a legend circle, the orange of a pill,
      the label of the guest's seats and the staff bar would print white on
-     white. */
+     white, the grey of the couple's seat numbers not at all. */
   .legend__mark,
   .pill,
+  .seat-number--couple,
   .time-label--strong,
   .staff-bar {
     -webkit-print-color-adjust: exact;

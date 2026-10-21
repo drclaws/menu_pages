@@ -135,6 +135,13 @@ def render_page(tree: dict, template: core.Template | None = None) -> str:
     return core.strip_html_comments(template.render(tree), TEMPLATE.name)
 
 
+def render_strict(tree: dict, template: core.Template, reads: set[str] | None = None) -> str:
+    """The page of `tree` with every node `Strict`: a variant of a tree reaches
+    branches the four trees do not, and a field outside the contract read
+    there fails as well."""
+    return render_page(strict(tree, set() if reads is None else reads), template)
+
+
 def html_problems(page: str) -> list[tuple[int, str]]:
     return core.check_html(page, PUBLISHED.__contains__, allow_paths=ALLOW_PATHS)
 
@@ -280,6 +287,9 @@ class TreeTests(unittest.TestCase):
         self.assertTrue(widgets_of(trees["staff"], "seating")[0]["legend"])
         titles = [widget["title"] for widget in widgets_of(trees["staff"], "dishes")]
         self.assertEqual(titles, ["", "On request"])
+        # the title of a list is for both audiences
+        titles = [widget["title"] for widget in widgets_of(trees["guest-without-table"], "dishes")]
+        self.assertEqual(titles, ["For the table"])
         self.assertTrue(widgets_of(trees["guest-plus-one"], "drinks")[0]["note"])
         self.assertTrue(widgets_of(trees["staff"], "drinks")[0]["note"])
         self.assertTrue(widgets_of(trees["staff"], "sets")[0]["note"])
@@ -290,36 +300,13 @@ class TreeTests(unittest.TestCase):
                    for widget in widgets_of(tree, "drinks") for group in widget["groups"]}
         self.assertEqual(layouts, set(T.ENUMS["layout"]))
 
-    def test_each_page_has_the_fields_of_its_audience_only(self):
+    def test_the_staff_page_has_its_texts_and_counters(self):
         for name, tree in T.all_trees().items():
-            staff_page = tree["isStaff"]
             with self.subTest(tree=name):
-                self.assertEqual(name == "staff", staff_page)
-                if staff_page:
-                    self.assertTrue(all(tree["staff"].values()))
-                    self.assertTrue(all(tree["counters"].values()))
-                else:
-                    self.assertFalse(any(tree["staff"].values()))
-                    self.assertFalse(any(tree["counters"].values()))
-                for widget in widgets_of(tree, "seating"):
-                    guest_fields = (widget["mySeats"], widget["seatLabel"], widget["whoLabel"])
-                    staff_fields = (widget["legend"], widget["rows"], widget["footnote"])
-                    self.assertFalse(any(staff_fields if not staff_page else guest_fields))
-                for widget in widgets_of(tree, "drinks"):
-                    self.assertFalse(widget["groups"] if staff_page else widget["list"])
-                if not staff_page:
-                    dishes = [item for widget in widgets_of(tree, "dishes")
-                              for item in widget["items"]]
-                    dishes += [course for widget in widgets_of(tree, "sets")
-                               for item in widget["items"] for course in item["courses"]]
-                    for dish in dishes:
-                        self.assertFalse(dish["allergens"] or dish["tags"] or dish["note"]
-                                         or dish["noRestrictions"] or dish["swapLines"])
-                    for widget in widgets_of(tree, "sets"):
-                        self.assertFalse(any(item["swapLines"] for item in widget["items"]))
-                    self.assertFalse([widget for widget in widgets_of(tree, "dishes")
-                                      if widget["title"]])
-
+                self.assertEqual(name == "staff", tree["isStaff"])
+        staff = T.staff()
+        self.assertTrue(all(staff["staff"].values()))
+        self.assertTrue(all(staff["counters"].values()))
 
     def test_the_fields_of_the_other_audience_are_empty(self):
         def empty(value) -> bool:
@@ -494,7 +481,7 @@ class PageTests(unittest.TestCase):
     def setUpClass(cls):
         cls.template = core.load_template(TEMPLATE)
         cls.trees = T.all_trees()
-        cls.pages = {name: render_page(tree, cls.template) for name, tree in cls.trees.items()}
+        cls.pages = {name: render_strict(tree, cls.template) for name, tree in cls.trees.items()}
 
     def guest_pages(self):
         return {name: page for name, page in self.pages.items() if name != "staff"}
@@ -598,7 +585,9 @@ class PageTests(unittest.TestCase):
         def page(**staff):
             tree = T.staff()
             tree["staff"].update(staff)
-            document = render_page(tree, self.template)
+            reads: set[str] = set()
+            document = render_strict(tree, self.template, reads)
+            self.assertEqual(reads & GUEST_ONLY, set())
             self.assertEqual(html_problems(document), [])
             return document
 
@@ -636,7 +625,7 @@ class PageTests(unittest.TestCase):
         tree = T.guest_plus_one()
         widgets_of(tree, "seating")[0]["whoLabel"] = "Olga <b>& co</b> {{x}}"
         widgets_of(tree, "dishes")[0]["items"][0]["name"] = "<script>alert(1)</script>"
-        page = render_page(tree, self.template)
+        page = render_strict(tree, self.template)
         self.assertIn("Olga &lt;b&gt;&amp; co&lt;/b&gt; &#123;&#123;x&#125;&#125;", page)
         self.assertNotIn("<b>", page)
         self.assertNotIn("<script>alert", page)
@@ -650,7 +639,7 @@ class WidgetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.template = core.load_template(TEMPLATE)
-        cls.pages = {name: render_page(tree, cls.template)
+        cls.pages = {name: render_strict(tree, cls.template)
                      for name, tree in T.all_trees().items()}
 
     def section(self, page: str, section_id: str) -> str:
@@ -683,8 +672,8 @@ class WidgetTests(unittest.TestCase):
     def test_the_counters_show_only_what_there_is(self):
         tree = T.staff()
         tree["counters"].update(notes=0, notesText="", tableLabel="")
-        cover = re.search(r'<section class="cover.*?</section>', render_page(tree, self.template),
-                          re.S).group(0)
+        cover = re.search(r'<section class="cover.*?</section>',
+                          render_strict(tree, self.template), re.S).group(0)
         self.assertEqual(re.findall(r'<li class="pill[^"]*">([^<]*)</li>', cover), ["14 guests"])
 
     def test_the_seats_of_a_guest(self):
@@ -735,7 +724,7 @@ class WidgetTests(unittest.TestCase):
         for name in ("guest-plus-one", "staff"):
             tree = T.all_trees()[name]
             widgets_of(tree, "seating")[0]["scheme"] = T.scheme_example(name == "staff")
-            page = render_page(strict(tree, set()), self.template)
+            page = render_strict(tree, self.template)
             with self.subTest(page=name):
                 self.assertEqual(html_problems(page), [])
                 self.assertEqual("seating__divider" in page, name == "staff")
@@ -747,6 +736,12 @@ class WidgetTests(unittest.TestCase):
         self.assertEqual(re.findall(r"<p [^>]*>([^<]*)</p>", items[0]),
                          ["Beetroot tartare", "Beetroot, walnuts, rye crisp"])
         self.assertNotIn("dishes__title", section)
+        # the title of a list is not a staff part: a guest's list may have one
+        titled = self.section("guest-without-table", "starters")
+        self.assertRegex(titled, r'<div class="widget dishes-widget" id="s-starters--w1">\s*'
+                                 r'<p class="dishes__title">For the table</p>\s*'
+                                 r'<ul class="dishes" role="list">')
+        self.assertNotIn("pills", titled)
 
     def test_the_dishes_of_the_staff(self):
         section = self.section("staff", "starters")
@@ -771,7 +766,7 @@ class WidgetTests(unittest.TestCase):
     def test_a_dish_without_allergen_information(self):
         tree = T.staff()
         widgets_of(tree, "dishes")[0]["items"][0].update(allergens=[], swapLines=[])
-        page = render_page(tree, self.template)
+        page = render_strict(tree, self.template)
         # an empty row, which the style sheet hides (.pills:empty)
         self.assertRegex(page, r'<p class="dish__name">Beetroot tartare</p>\s*'
                                r'<ul class="pills" role="list"></ul>\s*</li>')

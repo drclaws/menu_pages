@@ -256,6 +256,12 @@ SETS = (
       "By seat 10 (no gluten) — serve the first course without croutons.")),
 )
 
+#: The starters of a menu without a table, under a title of the list.
+PLAIN_STARTERS = (
+    ("Sourdough and butter", "Sourdough bread, salted butter", {}),
+    ("Garden salad", "Leaves, radish, lemon dressing", {}),
+)
+
 #: The sets of a menu without a table: one course each, some without a hint,
 #: an eyebrow or a pairing.
 PLAIN_SETS = (
@@ -333,7 +339,8 @@ def guest_plus_one() -> dict:
 
 
 def guest_without_table() -> dict:
-    """Klara at seat 1 of a menu without a table: no scheme, three sets."""
+    """Klara at seat 1 of a menu without a table: no scheme, a titled list of
+    starters, three sets."""
     return root(staff_page=False, sections=[
         cover(),
         section("welcome", "Welcome", widgets=[
@@ -345,6 +352,9 @@ def guest_without_table() -> dict:
         ]),
         section("seats", "Your seat", widgets=[seating(
             "seats", my_seats=((1, "You"),), seat_label="Seat 1", who_label="Klara")]),
+        section("starters", "Starters", widgets=[
+            widget("dishes", "starters", 1, title="For the table",
+                   items=dishes(PLAIN_STARTERS, False))]),
         section("main", "Main course", "Choose one of three sets", widgets=[
             widget("sets", "main", 1, items=sets("s-main--w1", PLAIN_SETS, False), note="",
                    count=3, multiple=True)]),

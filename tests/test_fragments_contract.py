@@ -54,6 +54,26 @@ UNREAD = {
        for field in T.NODES[kind]},
 }
 
+#: The fields that only the staff page fills: a guest's page has them empty
+#: and never reads them.
+STAFF_ONLY = frozenset({
+    "root.staff", "staff.updated", "staff.contact", "staff.reminder",
+    "root.counters", *(f"counters.{field}" for field in T.NODES["counters"]),
+    "seating.legend", "seating.rows", "seating.footnote",
+    *(f"legend.{field}" for field in T.NODES["legend"]),
+    *(f"row.{field}" for field in T.NODES["row"]),
+    "dish.allergens", "dish.tags", "dish.noRestrictions", "dish.swapLines", "dish.note",
+    "set.swapLines", "drinks.list",
+})
+#: The fields that only a guest's page fills: the staff page has them empty
+#: (or has no such widget) and never reads them.
+GUEST_ONLY = frozenset({
+    "seating.mySeats", *(f"mySeat.{field}" for field in T.NODES["mySeat"]),
+    "seating.seatLabel", "seating.whoLabel",
+    "drinks.groups", *(f"group.{field}" for field in T.NODES["group"]),
+    *(f"link.{field}" for field in T.NODES["widget:link"] if field not in T.WIDGET_COMMON_FIELDS),
+})
+
 #: The words of the interface: they live in the fragments, never in the tree.
 STAFF_WORDS = ("Staff version · not for guests", "updated", "No.", "Guest · dietary notes",
                "’s guest", "[name]", "no restrictions", "Contact on the night:")
@@ -301,6 +321,21 @@ class TreeTests(unittest.TestCase):
                                       if widget["title"]])
 
 
+    def test_the_fields_of_the_other_audience_are_empty(self):
+        def empty(value) -> bool:
+            if isinstance(value, dict):
+                return all(empty(item) for item in value.values())
+            return not value
+
+        for name, tree in T.all_trees().items():
+            other = GUEST_ONLY if tree["isStaff"] else STAFF_ONLY
+            for kind, value in T.nodes(tree):
+                for field, item in value.items():
+                    if field_name(kind, field) in other:
+                        with self.subTest(tree=name, field=field_name(kind, field)):
+                            self.assertTrue(empty(item))
+
+
 class FragmentFilesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -401,9 +436,10 @@ class ContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.template = core.load_template(TEMPLATE)
-        cls.reads: set[str] = set()
-        cls.pages = {name: render_page(strict(tree, cls.reads), cls.template)
+        cls.page_reads: dict[str, set[str]] = {name: set() for name in T.TREES}
+        cls.pages = {name: render_page(strict(tree, cls.page_reads[name]), cls.template)
                      for name, tree in T.all_trees().items()}
+        cls.reads = set().union(*cls.page_reads.values())
 
     def test_the_trees_render(self):
         self.assertEqual(set(self.pages), set(T.TREES))
@@ -432,6 +468,21 @@ class ContractTests(unittest.TestCase):
         for field, reason in UNREAD.items():
             with self.subTest(field=field):
                 self.assertTrue(reason)
+
+    def test_each_page_reads_the_fields_of_its_audience_only(self):
+        # a staff field read on a guest's page would show the staff part as
+        # soon as the data layer filled it there by mistake, and the other way
+        self.assertLessEqual(STAFF_ONLY | GUEST_ONLY, CONTRACT)
+        self.assertEqual(STAFF_ONLY & GUEST_ONLY, frozenset())
+        for name, reads in self.page_reads.items():
+            other = GUEST_ONLY if name == "staff" else STAFF_ONLY
+            with self.subTest(page=name):
+                self.assertEqual(reads & other, set())
+        # and each page does read the fields of its own audience
+        self.assertLessEqual(STAFF_ONLY, self.page_reads["staff"])
+        guests = set().union(*(reads for name, reads in self.page_reads.items()
+                               if name != "staff"))
+        self.assertEqual(GUEST_ONLY - guests, GUEST_ONLY & set(UNREAD))
 
 
 # --- the pages --------------------------------------------------------------------

@@ -21,7 +21,9 @@ the code and `favicon.svg`, generated from the design tokens of
 `assets/app.css` - nothing else.  The output is assembled next to `--out`
 (`dist` in the current directory by default) and replaces it only when every
 check has passed: nothing but the expected files, no external resources, no
-inline scripts or styles, every local URL resolves inside the output.  Its
+inline scripts or styles, every local URL resolves inside the output, and no
+file holds the token of a record (a token is only the name of the directory
+of its page).  Its
 contents are published under `--base-path` (`/` by default): every URL of the
 output starts with it, and a local address outside it is an error - the pages
 lead nowhere else on the site.  Two builds of the same data are identical
@@ -408,7 +410,9 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
         written = _core.write_pages(temporary, rendered)
         copied = _core.copy_assets(CODE_DIR / ASSETS_DIR, temporary / ASSETS_DIR)
         write_favicon(temporary / ASSETS_DIR / FAVICON_FILE, palette)
-        stats = _output.check_menu_output(temporary, tokens, base_path=base_path)
+        stats = _output.check_menu_output(
+            temporary, tokens, base_path=base_path, numbers={page.token: page.number for page in pages}
+        )
 
     out_shown = _core.display_path(out_dir)
     log(f"build: wrote {written} page(s) to {out_shown}/<token>/")

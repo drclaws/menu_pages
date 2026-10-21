@@ -158,17 +158,51 @@ class OutputChecksTest(support.TempDirTestCase):
         # the output does not have at the top of the site
         expected = {"/menu": "points outside the output", "/": "does not exist in the output"}
         for base, words in expected.items():
-            for body in (f'<a href="{ELSEWHERE}">Other</a>', f'<a href="{ELSEWHERE}{TOKENS[0]}/">Other</a>'):
-                with self.subTest(base=base, body=body):
-                    out = self.make_output(base, {TOKENS[0]: body})
-                    self.assertEqual(self.problems(out, base), [f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}"])
+            with self.subTest(base=base):
+                out = self.make_output(base, {TOKENS[0]: f'<a href="{ELSEWHERE}">Other</a>'})
+                self.assertEqual(self.problems(out, base), [f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}"])
+                # with the token of the page in the address, that is a problem too
+                out = self.make_output(base, {TOKENS[0]: f'<a href="{ELSEWHERE}{TOKENS[0]}/">Other</a>'})
+                self.assertEqual(self.problems(out, base), [
+                    f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}",
+                    f"guests.json: guest #1: its token is in …/index.html; {_output.TOKEN_RULE}",
+                ])
 
-    def test_a_link_to_another_page_of_the_output_passes(self):
-        # what the checks allow; the pages of the menu have no link at all
+    def test_a_link_to_another_page_of_the_output_holds_its_token(self):
+        # the address resolves, but it names the other page by its token
         for base in ("/", "/menu"):
             with self.subTest(base=base):
                 link = f'<a href="{base.rstrip("/")}/{TOKENS[1]}/">Next</a>'
-                self.assertEqual(self.problems(self.make_output(base, {TOKENS[0]: link}), base), [])
+                self.assertEqual(
+                    self.problems(self.make_output(base, {TOKENS[0]: link}), base),
+                    [f"guests.json: guest #2: its token is in …/index.html; {_output.TOKEN_RULE}"],
+                )
+
+    def test_no_file_holds_a_token(self):
+        self.assertEqual(_output.TOKEN_RULE, "a token is only the name of the directory of its page")
+        # the own token on its page, another one in upper case, the staff token in the style sheet
+        out = self.make_output(bodies={TOKENS[0]: f"<p>{TOKENS[0]}</p>", TOKENS[2]: f"<p>{TOKENS[1].upper()}</p>"})
+        with open(out / "assets" / "app.css", "a", encoding="utf-8") as handle:
+            handle.write(f"/* {TOKENS[2].lower()} */\n")
+        self.assertEqual(self.problems(out), [
+            f"guests.json: guest #1: its token is in …/index.html; {_output.TOKEN_RULE}",
+            f"guests.json: guest #2: its token is in …/index.html; {_output.TOKEN_RULE}",
+            f"guests.json: guest #3: its token is in assets/app.css; {_output.TOKEN_RULE}",
+        ])
+
+    def test_a_token_in_several_files_is_one_line_with_the_number_of_its_record(self):
+        out = self.make_output(bodies={token: f"<p>{TOKENS[1]}</p>" for token in TOKENS})
+        (out / "assets" / "app.js").write_text(f"// {TOKENS[1]}\n", encoding="utf-8")
+        expected = (f"guests.json: guest #7: its token is in 4 files of the output, first: …/index.html; "
+                    f"{_output.TOKEN_RULE}")
+        numbers = {TOKENS[0]: 4, TOKENS[1]: 7, TOKENS[2]: 9}
+        self.assertEqual(_output.token_problems(out, TOKENS, numbers), [expected])
+        with self.assertRaises(_core.OutputError) as caught:
+            _output.check_menu_output(out, TOKENS, base_path="/", numbers=numbers)
+        self.assertEqual(caught.exception.errors, [expected])
+        # without the numbers a record is numbered by its place among the pages
+        self.assertEqual(_output.token_problems(out, TOKENS),
+                         [expected.replace("guest #7", "guest #2")])
 
     def test_a_resource_outside_the_output_is_an_error(self):
         for base in ("/", "/menu"):
@@ -181,7 +215,7 @@ class OutputChecksTest(support.TempDirTestCase):
     def test_the_check_takes_no_directory_of_the_site_but_the_base_path(self):
         # nothing outside the output is ever allowed
         self.assertEqual(list(inspect.signature(_output.check_menu_output).parameters),
-                         ["out_dir", "pages", "base_path"])
+                         ["out_dir", "pages", "base_path", "numbers"])
 
     def test_the_number_of_lines_is_limited(self):
         out = self.make_output(bodies={TOKENS[0]: '<p style="color: red">x</p>'})

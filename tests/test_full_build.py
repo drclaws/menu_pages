@@ -331,6 +331,46 @@ class FailingBuildTest(BuildTestCase):
                 self.assert_quiet_about(result, self.menu, self.guests)
                 self.assert_kept()
 
+    def test_a_token_written_into_the_data_fails(self):
+        # a token typed into a text by mistake reads as a word to the checks
+        # of the data; the check of the output finds it in any letter case
+        tokens = [record["token"] for record in self.guests]
+
+        def shared_text(menu, guests):
+            # the card of the main course, on every guest page but the one that hides it
+            menu["sections"][3]["widgets"][1]["text"] += f" Ask for {tokens[1]}."
+
+        def note_to_a_guest(menu, guests):
+            guests[3]["sections"] = {"signature": {"note": f"Your page: {tokens[3]}"}}
+
+        def staff_reminder(menu, guests):
+            menu["staff"]["reminder"] = f"The seat plan of {tokens[4].upper()} is final."
+
+        cases = {
+            "the shared text": (shared_text, "guests.json: guest #2: its token is in 11 files of the output, "
+                                             "first: …/index.html"),
+            "the note to a guest": (note_to_a_guest, "guests.json: guest #4: its token is in …/index.html"),
+            "the staff reminder": (staff_reminder, "guests.json: guest #5: its token is in …/index.html"),
+        }
+        for name, (change, problem) in cases.items():
+            with self.subTest(case=name):
+                menu, guests = fixtures.reserved19()
+                change(menu, guests)
+                data = self.write(name.replace(" ", "-"), menu, guests)
+                self.assertEqual(support.run_main("validate", "--data", data).returncode, 0)
+                fresh = self.tmp / f"fresh-{name.replace(' ', '-')}"
+                for out in (self.out, fresh):
+                    result = self.build(data, out, "--base-path", "/menu")
+                    self.assertEqual(result.returncode, 1)
+                    self.assertEqual(result.stdout.splitlines(), [
+                        f"build: 12 guest record(s) + staff validated (data: {_core.display_path(data)})"])
+                    self.assertEqual(result.stderr, f"error: {problem}; a token is only the name of the "
+                                                    "directory of its page\nbuild: failed with 1 error(s)\n")
+                    self.assert_quiet_about(result, menu, guests)
+                self.assertFalse(fresh.exists())
+                self.assertEqual(self.leftovers(fresh), [])
+                self.assert_kept()
+
     def test_a_file_system_error_names_the_file_only_once_the_tokens_are_known(self):
         token = self.guests[0]["token"]
         failure = OSError(13, "Permission denied", str(self.out / token / "index.html"))

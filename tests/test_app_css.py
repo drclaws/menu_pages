@@ -382,13 +382,17 @@ class SchemeStylesTest(unittest.TestCase):
         self.assertEqual(self.print[".scheme"], {"break-inside": "avoid",
                                                  "-webkit-print-color-adjust": "exact",
                                                  "print-color-adjust": "exact"})
-        self.assertEqual(self.print[".seating__meta"], {"break-before": "avoid"})
-        # the card itself may break: taller than the rest of a sheet it would
+        # the guest's card (the scheme and the label of the seats) stays whole
+        guest_card = ".menu--guest .seating__card"
+        self.assertEqual(self.print[guest_card], {"break-inside": "avoid"})
+        self.assertNotIn(".seating__meta", self.print)
+        # the staff card may break: taller than the rest of a sheet it would
         # move whole onto the next one
         for selector, values in self.print.items():
-            if "seating" in selector:
+            if "seating" in selector and selector != guest_card:
                 with self.subTest(selector=selector):
                     self.assertNotIn("break-inside", values)
+        self.assertNotIn("break-inside", self.print[".menu--staff .seating__card"])
 
     def test_print_tells_a_flagged_seat_and_the_guest_seat_in_black_and_white(self):
         self.assertEqual(self.print[".seat--flagged .seat__circle"],

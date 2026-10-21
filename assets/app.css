@@ -1942,19 +1942,22 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
     print-color-adjust: exact;
   }
 
-  /* The scheme: never split across two sheets, and the label of the guest's
-     seats under it stays with it (a break-after on the scheme would push
-     the whole row of the staff card, the table too, onto the next sheet).
-     Its fills are graphics, not backgrounds, yet a browser may still lighten
-     them: the badges, the guest's seats and the arms keep their colours. */
+  /* The scheme never splits across two sheets. Its fills are graphics, not
+     backgrounds, yet a browser may still lighten them: the badges, the
+     guest's seats and the arms keep their colours. */
   .scheme {
     break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  .seating__meta {
-    break-before: avoid;
+  /* The card of a guest's seats - the scheme and one line under it, less
+     than half a sheet - never splits either, so the label of the seats
+     stays on the sheet of the scheme. The staff card is left to break
+     between the rows of its table: whole, it can be taller than what is
+     left of a sheet. */
+  .menu--guest .seating__card {
+    break-inside: avoid;
   }
 
   /* In black and white a seat with a dietary note differs from a plain one

@@ -30,6 +30,37 @@ RAW_VALUE_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|col
 CONDITION_RE = re.compile(r"@media|@container|@supports")
 PANELS = "html.js .sets__tabs:not([hidden]) ~ .sets__panels"
 
+#: A math function whose arguments are scanned for bare factors.
+MATH_RE = re.compile(r"\b(?:calc|min|max|clamp)\(")
+#: A unitless number next to `*` or `/`: a size made from a token by a factor.
+FACTOR_RE = re.compile(r"[*/]\s*(-?\d*\.?\d+)(?![\w.%(])|(?<![\w.#-])(-?\d*\.?\d+)\s*[*/]")
+#: The factors allowed outside the token sections: a sign (`* -1`) and the
+#: switch of the tab row (`* 999` turns a difference into all or nothing).
+ALLOWED_FACTORS = frozenset({"-1", "999"})
+
+
+def math_arguments(css):
+    """The arguments of every outermost calc(), min(), max(), clamp() in the CSS."""
+    found, position = [], 0
+    while True:
+        match = MATH_RE.search(css, position)
+        if not match:
+            return found
+        depth, end = 0, match.end() - 1
+        for end in range(match.end() - 1, len(css)):
+            depth += {"(": 1, ")": -1}.get(css[end], 0)
+            if depth == 0:
+                break
+        found.append(css[match.end():end])
+        position = end + 1
+
+
+def bare_factors(css):
+    """Every unitless factor of a math function, but the allowed ones."""
+    return [factor for arguments in math_arguments(css)
+            for pair in FACTOR_RE.findall(arguments) for factor in pair
+            if factor and factor not in ALLOWED_FACTORS]
+
 
 def strip_comments(css):
     """The CSS without comments; line breaks are kept, so line numbers stay."""
@@ -96,6 +127,27 @@ class StyleSheetTest(unittest.TestCase):
         # what comes before the first section is the header comment only
         first = self.raw.index(self.sections["1"][1])
         self.assertEqual(strip_comments(self.raw[:first]).strip(), "")
+
+    def test_no_sizes_made_by_a_factor_outside_the_token_sections(self):
+        # `calc(var(--space-3xs) * 0.75)` is a raw value too: a size off the
+        # scale of the tokens; it belongs in a named token of section 1a
+        for number, (_first_line, text) in self.sections.items():
+            if number not in TOKEN_SECTIONS:
+                with self.subTest(section=number):
+                    self.assertEqual(bare_factors(strip_comments(text)), [])
+
+    def test_the_factor_check_tells_a_factor_from_a_token(self):
+        for css in ("a { b: calc(var(--x) * 0.75); }", "a { b: calc(var(--x) / 2); }",
+                    "a { b: calc(0.5 * var(--x)); }", "a { b: max(var(--x), calc(var(--y) * 2)); }",
+                    "a { b: min(100%, calc(var(--x) * 1.5)); }"):
+            with self.subTest(css=css):
+                self.assertEqual(len(bare_factors(css)), 1)
+        for css in ("a { b: calc(var(--x) * -1); }", "a { b: calc((var(--x) - 100%) * 999); }",
+                    "a { b: calc(var(--x) * var(--y) / var(--z)); }",
+                    "a { b: calc(var(--x, 1) - 1); }", "a { grid-column: 1 / -1; }",
+                    "a { b: calc(var(--x) + 2px); }"):
+            with self.subTest(css=css):
+                self.assertEqual(bare_factors(css), [])
 
     def test_condition_numbers_match_their_tokens(self):
         # var() does not work in conditions: each number is repeated from a
@@ -241,8 +293,7 @@ class MenuStylesTest(unittest.TestCase):
 
     def test_print_of_the_staff_page_is_compact(self):
         self.assertEqual(self.print[".menu--staff .section"], "margin-block: var(--space-md);")
-        self.assertEqual(self.print[".seat-table td"],
-                         "padding-block: calc(var(--space-3xs) / 2);")
+        self.assertEqual(self.print[".seat-table td"], "padding-block: var(--space-3xs);")
         self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
         self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
         self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")

@@ -498,6 +498,13 @@
      360px screen at the default font (16px, and 17px on iOS); with a larger
      font they all stand in a column. */
   --sets-tab-min: 9rem;
+
+  /* Small labels: the block padding of a pill and of a framed number (a seat
+     in the table of the staff page, a course in a set), half of the smallest
+     space; the width of a framed number, room for two digits at the
+     default font. */
+  --label-padding-block: calc(var(--space-3xs) / 2);
+  --number-box-width: 2.125rem;
 }
 
 
@@ -1110,7 +1117,7 @@ a.btn[aria-disabled="true"] {
 
 .pill {
   display: inline-block;
-  padding: calc(var(--space-3xs) / 2) var(--space-2xs);
+  padding: var(--label-padding-block) var(--space-2xs);
   border: var(--line-width-hairline) solid var(--color-line);
   border-radius: var(--radius-sm);
   background-color: var(--color-surface);
@@ -1206,8 +1213,8 @@ a.btn[aria-disabled="true"] {
 .seat-number {
   display: inline-flex;
   justify-content: center;
-  min-inline-size: calc(var(--tap-min) * 0.75);
-  padding-block: calc(var(--space-3xs) * 0.75);
+  min-inline-size: var(--number-box-width);
+  padding-block: var(--label-padding-block);
   border: var(--line-width-hairline) solid var(--color-line);
   border-radius: var(--radius-sm);
   background-color: var(--color-bg);
@@ -1563,7 +1570,7 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
 
 .sets__courses > .dish {
   display: grid;
-  grid-template-columns: calc(var(--tap-min) * 0.7) minmax(0, 1fr);
+  grid-template-columns: var(--number-box-width) minmax(0, 1fr);
   align-items: baseline;
   column-gap: var(--space-xs);
   row-gap: var(--space-3xs);
@@ -1574,7 +1581,7 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
   content: counter(course);
   display: inline-flex;
   justify-content: center;
-  padding-block: calc(var(--space-3xs) * 0.75);
+  padding-block: var(--label-padding-block);
   border: var(--line-width-hairline) solid var(--color-line);
   border-radius: var(--radius-sm);
   background-color: var(--color-bg);
@@ -1830,7 +1837,7 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   }
 
   .seat-table td {
-    padding-block: calc(var(--space-3xs) / 2);
+    padding-block: var(--space-3xs);
   }
 
   .seat-number {

@@ -1,0 +1,28 @@
+<!-- The drinks; expects in `.`: domId, groups[] (title, layout - list | inline, joined, items[] - category, name, line), list[] (category, name, line), note. The guest page has the groups under small capitals: an inline group is its one line (joined), a list group names every drink under the label of its category. The staff page has one list instead, the category on the left and the text on the right. The note stands under them. -->
+<div class="widget drinks-widget drinks" id="{{.domId}}">
+  <!-- each:.groups -->
+  <div class="drinks__group drinks__group--{{.layout}}"><!-- if:.title -->
+    <p class="drinks__title">{{.title}}</p><!-- endif --><!-- if:.joined -->
+    <p class="drinks__joined">{{.joined}}</p><!-- endif --><!-- if:!.joined --><!-- if:.items -->
+    <ul class="drinks__list" role="list">
+      <!-- each:.items -->
+      <li class="drink"><span class="time-label drink__category">{{.category}}</span><p class="drink__name">{{.name}}</p><!-- if:.line --><p class="note-line drink__line">{{.line}}</p><!-- endif --></li>
+      <!-- endeach -->
+    </ul><!-- endif --><!-- endif -->
+  </div>
+  <!-- endeach --><!-- if:.list -->
+  <div class="schedule schedule--ruled drinks__staff">
+    <ul class="schedule__list" role="list">
+      <!-- each:.list -->
+      <li class="schedule__item">
+        <span class="time-label schedule__time">{{.category}}</span>
+        <div class="stack stack--tight schedule__body">
+          <p class="schedule__name">{{.name}}</p><!-- if:.line -->
+          <p class="note-line">{{.line}}</p><!-- endif -->
+        </div>
+      </li>
+      <!-- endeach -->
+    </ul>
+  </div><!-- endif --><!-- if:.note -->
+  <p class="note-line drinks__note">{{.note}}</p><!-- endif -->
+</div>

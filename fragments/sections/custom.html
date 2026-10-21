@@ -1,0 +1,10 @@
+<!-- A section of widgets; expects in `.`: domId, titleId, title, eyebrow, note, widgets[]; in the page root: isStaff. The only place of the page with the reveal mark, and on the guest page alone: one per section, on the container of the head and the body. The staff page has no motion, so its container goes without the mark. -->
+<section class="section" id="{{.domId}}" aria-labelledby="{{.titleId}}">
+  <!-- if:!isStaff --><div class="container" data-reveal><!-- endif --><!-- if:isStaff --><div class="container"><!-- endif -->
+    <!-- include:partials/section-head -->
+    <div class="stack section__body">
+      <!-- each:.widgets --><!-- include:widgets/{{.type}} --><!-- endeach -->
+      <!-- include:partials/section-note -->
+    </div>
+  </div>
+</section>

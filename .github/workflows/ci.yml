@@ -35,6 +35,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # site/: the invitations builder, whose code the menu builder loads
+          submodules: true
 
       - name: Set up Python ${{ matrix.python }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -70,10 +72,42 @@ jobs:
           fi
           echo "OK: no tracked media or build output"
 
+      - name: No Cyrillic in tracked files
+        run: |
+          set -euo pipefail
+          # Every tracked file of this repository, read as UTF-8.  The submodule is a
+          # single entry of the listing (its directory) and is not entered.  A name or
+          # a file that is not UTF-8 is refused too: Cyrillic in another encoding would
+          # go unseen.  Only file names and line numbers are printed, never the text.
+          git ls-files -z | python -c '
+          import os, sys
+          def cyrillic(text):
+              return any(0x400 <= ord(char) <= 0x4FF for char in text)
+          found = []
+          for raw in sys.stdin.buffer.read().split(b"\0"):
+              if not raw:
+                  continue
+              name = raw.decode("utf-8", "replace")
+              try:
+                  if cyrillic(raw.decode("utf-8")):
+                      found.append(f"{name}: in the file name")
+                  if os.path.isfile(raw):
+                      with open(raw, "rb") as handle:
+                          text = handle.read().decode("utf-8")
+                      found += [f"{name}:{number}" for number, line in
+                                enumerate(text.split("\n"), 1) if cyrillic(line)]
+              except UnicodeDecodeError:
+                  found.append(f"{name}: not UTF-8")
+          if found:
+              print("Tracked files must be UTF-8 without Cyrillic:", *found, sep="\n", file=sys.stderr)
+              sys.exit(1)
+          '
+          echo "OK: no Cyrillic in tracked files"
+
       - name: Unit tests
         run: |
           set -euo pipefail
-          python -m unittest
+          python -m unittest discover -s tests -t .
 
       - name: Working tree stays clean
         run: |

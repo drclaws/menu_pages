@@ -1,8 +1,10 @@
 """Tests of the bridge to the invitations builder (`menu_tools/_core.py`)."""
 
+import argparse
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -202,6 +204,46 @@ class ExportsTest(unittest.TestCase):
     def test_exit_codes(self):
         self.assertEqual((core.EXIT_OK, core.EXIT_ERROR, core.EXIT_USAGE), (0, 1, 2))
 
+    def test_the_argument_types_keep_good_values(self):
+        self.assertEqual(core.token_prefix("heron"), "heron")
+        self.assertEqual(core.parse_published_url("https://example.org/menu/"), "https://example.org/menu")
+        self.assertEqual(core.allow_path_argument("/invite/"), "/invite")
+        self.assertEqual(core.base_path_argument("/menu"), "/menu")
+
+    def test_the_argument_types_do_not_repeat_the_value(self):
+        # a refused value may be private (a name in a prefix, credentials in
+        # an address): the message names the problem, never the value
+        cases = (
+            (core.token_prefix, "Rosalind and Leopold"),
+            (core.token_prefix, "Wendell" * 40),
+            (core.parse_published_url, "https://wendell:hunter-secret@example.org/menu"),
+            (core.parse_published_url, "ftp://bjarne-host.example.org/menu"),
+            (core.parse_published_url, "https://example.org/menu?judy=1"),
+            (core.allow_path_argument, "/rosalind path"),
+            (core.base_path_argument, "/leopold path"),
+        )
+        for convert, value in cases:
+            with self.subTest(convert=convert.__name__, value=value):
+                with self.assertRaises(argparse.ArgumentTypeError) as caught:
+                    convert(value)
+                message = str(caught.exception)
+                self.assertTrue(message)
+                self.assertNotIn(value, message)
+                for word in re.findall(r"[A-Za-z]{4,}", value):
+                    if word not in ("https", "example", "menu", "path"):
+                        self.assertNotIn(word.lower(), message.lower())
+
+    def test_the_reserved_tokens_are_refused_by_the_token_check(self):
+        self.assertTrue(core.RESERVED_TOKENS)
+        for token in core.RESERVED_TOKENS:
+            with self.subTest(token=token):
+                self.assertIsNotNone(core.check_token(token))
+                self.assertIsNotNone(core.check_token(token.upper()))
+
+    def test_the_colour_of_a_token_is_written_as_hex(self):
+        self.assertEqual(core.hex_color((250, 247, 242)), "#faf7f2")
+        self.assertTrue(issubclass(core.TokenError, ValueError))
+
 
 class WithoutTheSubmoduleTest(unittest.TestCase):
     def setUp(self):
@@ -222,9 +264,17 @@ class WithoutTheSubmoduleTest(unittest.TestCase):
 
     def test_an_empty_submodule_directory_gives_the_same_message(self):
         (self.root / "site").mkdir()
-        for command in ("build", "validate"):
+        commands = (
+            ("build",),
+            ("build", "--base-path", "/menu", "--allow-path", "/invite"),
+            ("validate",),
+            ("links", "--url", "https://example.org/menu"),
+            ("token",),
+            ("token", "--prefix", "heron"),
+        )
+        for command in commands:
             with self.subTest(command=command):
-                result = run_python(str(self.root / "build.py"), command, cwd=self.work)
+                result = run_python(str(self.root / "build.py"), *command, cwd=self.work)
                 self.assert_missing_message(result)
 
     def test_help_still_works(self):

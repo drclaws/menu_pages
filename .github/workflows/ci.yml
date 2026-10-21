@@ -1,5 +1,5 @@
-# Runs the unit tests and the repository hygiene checks.
-# No secrets, nothing is deployed.
+# Runs the unit tests and the repository hygiene checks, then builds the
+# example data sets and checks the pages.  No secrets, nothing is deployed.
 name: CI
 
 on:
@@ -108,6 +108,66 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest discover -s tests -t .
+
+      - name: Validate and build the main example set
+        run: |
+          set -euo pipefail
+          python build.py validate
+          # the link back to the invitation leads to a directory of the fictional site, not built here
+          python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist"
+
+      - name: Validate and build the set without a table
+        run: |
+          set -euo pipefail
+          python build.py validate --data examples/data-plain
+          python build.py build --data examples/data-plain --out "$RUNNER_TEMP/dist-plain"
+
+      - name: Build the main example set under a base path
+        run: |
+          set -euo pipefail
+          # the layout a real site uses: the menu in a directory of the site
+          python build.py build --base-path /menu --allow-path /invite --out "$RUNNER_TEMP/site/menu"
+
+      - name: Check the built pages
+        run: |
+          set -euo pipefail
+          # Only counts and the output directories are printed, never a token.
+          python - examples/data "$RUNNER_TEMP/dist" examples/data-plain "$RUNNER_TEMP/dist-plain" \
+            examples/data "$RUNNER_TEMP/site/menu" <<'PY'
+          import json, re, sys
+          from pathlib import Path
+          for data, out in zip(map(Path, sys.argv[1::2]), map(Path, sys.argv[2::2])):
+              records = json.loads((data / "guests.json").read_text(encoding="utf-8"))
+              tokens = [record["token"] for record in records]
+              staff = [record["token"] for record in records if record.get("staff") is True]
+              top = sorted(path.name for path in out.iterdir())
+              assert top == sorted(["assets", *tokens]), f"{out}: the top holds more than assets/ and a directory per record"
+              for token in tokens:
+                  names = [path.name for path in (out / token).iterdir()]
+                  assert names == ["index.html"], f"{out}: a directory of a page holds more than index.html"
+                  page = (out / token / "index.html").read_text(encoding="utf-8")
+                  assert not re.search(r"(?i)\sstyle\s*=", page), f"{out}: a page has a style attribute"
+                  assert "{token}" not in page, f"{out}: a page has the placeholder of a token"
+              assets = sorted(path.name for path in (out / "assets").iterdir())
+              assert assets == ["app.css", "app.js", "favicon.svg"], f"{out}/assets: {assets}"
+              assert len(staff) == 1, f"{data}: no staff record"
+              page = (out / staff[0] / "index.html").read_text(encoding="utf-8")
+              assert '<meta name="robots" content="noindex, nofollow">' in page, f"{out}: the staff page has no robots tag"
+              print(f"OK: {out} ({len(tokens)} page(s))")
+          PY
+
+      - name: Reproducible build
+        run: |
+          set -euo pipefail
+          python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist2"
+          tree_hash() {
+            (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+          }
+          tree_hash "$RUNNER_TEMP/dist" > "$RUNNER_TEMP/dist.sha256"
+          tree_hash "$RUNNER_TEMP/dist2" > "$RUNNER_TEMP/dist2.sha256"
+          test -s "$RUNNER_TEMP/dist.sha256"
+          diff "$RUNNER_TEMP/dist.sha256" "$RUNNER_TEMP/dist2.sha256"
+          echo "OK: two builds are identical"
 
       - name: Working tree stays clean
         run: |

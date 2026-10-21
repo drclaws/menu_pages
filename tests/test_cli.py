@@ -16,14 +16,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import build  # noqa: E402  (imported after sys.path is prepared)
-from tests import fixtures  # noqa: E402
+from tests import fixtures, support  # noqa: E402
 
 SCRIPT = ROOT / "build.py"
 
 if Path(build.__file__).resolve() != SCRIPT:  # pragma: no cover
     raise RuntimeError(f"unexpected build module: {build.__file__}")
 
-COMMANDS = ("build", "validate")
+COMMANDS = ("build", "validate", "links", "token")
 
 #: The width argparse wraps its messages to, the same in and out of process.
 COLUMNS = "80"
@@ -44,18 +44,24 @@ WARNINGS = {
 }
 
 
-def run_main(*args: str) -> SimpleNamespace:
-    """Run `build.main()` in-process; argparse exits are turned into codes."""
+def run_main(*args: str, cwd: Path | None = None) -> SimpleNamespace:
+    """Run `build.main()` in-process (from the directory `cwd`, if given);
+    argparse exits are turned into codes."""
     stdout, stderr = io.StringIO(), io.StringIO()
+    previous = os.getcwd()
     with (
         mock.patch.dict(os.environ, {"COLUMNS": COLUMNS}),
         contextlib.redirect_stdout(stdout),
         contextlib.redirect_stderr(stderr),
     ):
         try:
-            code = build.main(list(args))
+            if cwd is not None:
+                os.chdir(cwd)
+            code = build.main([str(arg) for arg in args])
         except SystemExit as exc:  # argparse: --help and usage errors
             code = exc.code if isinstance(exc.code, int) else 2
+        finally:
+            os.chdir(previous)
     return SimpleNamespace(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
 
 
@@ -95,17 +101,14 @@ class CliTest(unittest.TestCase):
         self.assertIn("usage:", result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_build_is_not_implemented_yet(self):
-        result = run_main("build")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stderr, "error: 'build' is not implemented yet\n")
-        self.assertEqual(result.stdout, "")
-
-    def test_build_takes_no_parameters_yet(self):
-        result = run_main("build", "--out", "dist")
+    def test_build_takes_the_data_the_output_and_the_paths(self):
+        result = run_main("build", "--help")
+        self.assertEqual(result.returncode, 0)
+        for option in ("--data DIR", "--out DIR", "--base-path PATH", "--allow-path PATH"):
+            self.assertIn(option, result.stdout)
+        result = run_main("build", "--media", "media")
         self.assertEqual(result.returncode, 2)
         self.assertIn("unrecognized arguments", result.stderr)
-        self.assertNotIn("is not implemented yet", result.stderr)
 
     def test_validate_takes_the_data_directory_only(self):
         result = run_main("validate", "--out", "dist")
@@ -119,7 +122,6 @@ class CliTest(unittest.TestCase):
         result = run_main("deploy")
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid choice", result.stderr)
-        self.assertNotIn("is not implemented yet", result.stderr)
         self.assertEqual(result.stdout, "")
 
     def test_import_has_no_output(self):
@@ -140,13 +142,25 @@ class CliTest(unittest.TestCase):
     def test_script_from_another_directory_behaves_the_same(self):
         with tempfile.TemporaryDirectory(prefix="menu-build-test-") as temporary:
             base = Path(temporary).resolve()
-            data = fixtures.write_data(base / "data", *fixtures.reserved19())
+            menu, guests = fixtures.reserved19()
+            data = fixtures.write_data(base / "data", menu, guests)
+            allowed = support.allowed_path(menu)
             work = base / "work"
             work.mkdir()
-            cases = (("--help",), (), ("build",), ("validate", "--data", str(data)), ("deploy",))
+            out = base / "out"
+            cases = (
+                ("--help",),
+                (),
+                ("build", "--data", str(base / "nowhere"), "--out", str(out)),
+                ("build", "--data", str(data), "--out", str(out), "--allow-path", allowed),
+                ("validate", "--data", str(data)),
+                ("token", "--prefix", "a b"),
+                ("links", "--url", "ftp://example.org/menu", "--data", str(data)),
+                ("deploy",),
+            )
             for args in cases:
                 with self.subTest(args=args):
-                    expected = run_main(*args)
+                    expected = run_main(*args, cwd=work)
                     result = run_script(*args, cwd=work)
                     self.assertEqual(result.returncode, expected.returncode)
                     self.assertEqual(result.stdout, expected.stdout)
@@ -154,6 +168,104 @@ class CliTest(unittest.TestCase):
             # nothing is written to the current directory, nor next to the data
             self.assertEqual(list(work.iterdir()), [])
             self.assertEqual(sorted(path.name for path in data.iterdir()), ["guests.json", "menu.json"])
+            self.assertEqual(sorted(path.name for path in base.iterdir()), ["data", "out", "work"])
+
+
+class TokenTest(unittest.TestCase):
+    def check(self, token: str) -> None:
+        from menu_tools import _core
+
+        self.assertIsNone(_core.check_token(token))
+        self.assertNotIn(token.lower(), _core.RESERVED_TOKENS)
+
+    def test_a_random_token(self):
+        tokens = set()
+        for _ in range(3):
+            result = run_main("token")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertRegex(result.stdout, r"\A[A-Za-z0-9_-]{16,}\n\Z")
+            self.check(result.stdout.strip())
+            tokens.add(result.stdout)
+        self.assertEqual(len(tokens), 3)
+
+    def test_a_readable_token(self):
+        for prefix in ("heron", "Crane_2", "a"):
+            with self.subTest(prefix=prefix):
+                result = run_main("token", "--prefix", prefix)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertRegex(result.stdout, rf"\A{prefix}-[a-z0-9]{{4}}\n\Z")
+                self.check(result.stdout.strip())
+
+    def test_a_bad_prefix_is_a_usage_error_that_does_not_repeat_it(self):
+        for prefix in ("a b", "", "Rosalind's", "Leopold" * 30, "judy/x"):
+            with self.subTest(prefix=prefix):
+                result = run_main("token", "--prefix", prefix)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("build.py token: error: argument --prefix: the prefix", result.stderr)
+                if prefix:
+                    self.assertNotIn(prefix, result.stderr)
+                for word in ("Rosalind", "Leopold", "judy"):
+                    self.assertNotIn(word, result.stderr)
+
+    def test_token_reads_no_data(self):
+        result = run_main("token", "--data", "data")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_as_a_script(self):
+        with tempfile.TemporaryDirectory(prefix="menu-build-test-") as temporary:
+            result = run_script("token", "--prefix", "heron", cwd=Path(temporary))
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"\Aheron-[a-z0-9]{4}\n\Z")
+
+
+class BuildArgumentsTest(unittest.TestCase):
+    """`--base-path` and `--allow-path` are checked before anything is read."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="menu-build-test-")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        # neither exists: a refusal before the data is read is a usage error
+        self.args = ("build", "--data", str(self.base / "nowhere"), "--out", str(self.base / "out"))
+
+    def test_each_refused_value_is_a_usage_error_that_does_not_repeat_it(self):
+        cases = (
+            (("--allow-path", "/"), "--allow-path", "must not be '/'"),
+            (("--base-path", "/menu", "--allow-path", "/menu"), "--allow-path", "must not be the --base-path"),
+            (("--base-path", "/menu", "--allow-path", "/menu/wendell"), "--allow-path", "must not lie under the --base-path"),
+            (("--base-path", "/judy/x", "--allow-path", "/judy"), "--allow-path", "must not contain the --base-path"),
+            (("--allow-path", "/bjarne/../x"), "--allow-path", "must be a path from the root of the site"),
+            (("--allow-path", "rosalind"), "--allow-path", "must be a path from the root of the site"),
+            (("--base-path", "https://leopold.example.org/x"), "--base-path", "must be a path from the root of the site"),
+            (("--allow-path", "/ok", "--allow-path", "/a b"), "--allow-path", "must be a path from the root of the site"),
+        )
+        for extra, option, problem in cases:
+            with self.subTest(extra=extra):
+                result = run_main(*self.args, *extra)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("usage: build.py build", result.stderr)
+                self.assertIn(f"build.py build: error: argument {option}: {problem}", result.stderr)
+                for value in extra[1::2]:
+                    if value != "/":
+                        self.assertNotIn(value, result.stderr)
+                for word in ("wendell", "judy", "bjarne", "rosalind", "leopold"):
+                    self.assertNotIn(word, result.stderr)
+                self.assertFalse((self.base / "out").exists())
+
+    def test_the_allowed_paths_may_be_repeated(self):
+        menu, guests = fixtures.reserved19()
+        data = fixtures.write_data(self.base / "data", menu, guests)
+        allowed = support.allowed_path(menu)
+        result = run_main("build", "--data", str(data), "--out", str(self.base / "out"),
+                          "--allow-path", allowed, "--allow-path", "/other/", "--allow-path", allowed + "/")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"build: links allowed outside the output: {allowed}, /other\n", result.stdout)
 
 
 class ValidateTest(unittest.TestCase):
@@ -247,11 +359,17 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(lines[1:], ["validate: failed with 1 error(s)"])
 
     def test_the_default_data_directory_is_next_to_the_script(self):
-        result = run_main("validate")
-        self.assertEqual(result.returncode, 1)
-        expected = str(Path("examples") / "data")
-        self.assertTrue(result.stderr.startswith("error: data directory not found: "), result.stderr)
-        self.assertIn(expected, result.stderr)
+        # the main example set, whatever the current directory
+        expected = "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n"
+        for cwd in (None, self.base):
+            with self.subTest(cwd=cwd):
+                result = run_main("validate", cwd=cwd)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+                self.assertEqual(result.stderr, "")
+        result = run_script("validate", cwd=self.base)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ""))
+        self.assertEqual(list(self.base.iterdir()), [])
 
     def test_a_token_in_a_path_is_hidden(self):
         # the data lies in a directory named after a token, and a message names

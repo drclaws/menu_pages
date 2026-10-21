@@ -1,0 +1,156 @@
+"""Tests of the example data sets and of the pages built from them."""
+
+import json
+import re
+import tempfile
+import unittest
+from pathlib import Path
+
+from tests import support
+
+ROOT = support.ROOT
+EXAMPLES = ROOT / "examples"
+#: name -> (data directory, arguments of the build)
+SETS = {
+    "data": (EXAMPLES / "data", ("--base-path", "/menu", "--allow-path", "/invite")),
+    "data-plain": (EXAMPLES / "data-plain", ("--base-path", "/menu")),
+}
+SUMMARIES = {
+    "data": "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n",
+    "data-plain": "validate: OK - 4 seat(s), 3 guest record(s) + staff, 6 dish(es), 3 set(s), 2 drink(s)\n",
+}
+
+
+def load(directory: Path) -> tuple[dict, list]:
+    return tuple(json.loads((directory / name).read_text(encoding="utf-8")) for name in ("menu.json", "guests.json"))
+
+
+class ExampleDataTest(unittest.TestCase):
+    def test_the_sets_are_the_directories_of_examples(self):
+        self.assertEqual(sorted(path.name for path in EXAMPLES.iterdir()), sorted(SETS))
+        for directory, _args in SETS.values():
+            self.assertEqual(sorted(path.name for path in directory.iterdir()), ["guests.json", "menu.json"])
+
+    def test_the_files_are_json_indented_by_two_with_a_final_newline(self):
+        for directory, _args in SETS.values():
+            for path in sorted(directory.iterdir()):
+                with self.subTest(file=path.relative_to(ROOT).as_posix()):
+                    text = path.read_bytes().decode("utf-8")
+                    self.assertEqual(text, json.dumps(json.loads(text), ensure_ascii=False, indent=2) + "\n")
+
+    def test_each_set_passes_validate_without_a_warning(self):
+        for name, (directory, _args) in SETS.items():
+            with self.subTest(set=name):
+                result = support.run_main("validate", "--data", directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.stdout, SUMMARIES[name])
+
+    def test_the_tokens(self):
+        for name, (directory, _args) in SETS.items():
+            with self.subTest(set=name):
+                _menu, guests = load(directory)
+                for record in guests:
+                    if record.get("staff") is True:
+                        self.assertRegex(record["token"], r"\A[A-Za-z0-9_-]{16,}\Z")
+                    else:
+                        self.assertRegex(record["token"], r"\A[a-z]+-[a-z0-9]{4}\Z")
+
+    def test_the_names_of_the_people_are_not_part_of_the_shared_texts(self):
+        for name, (directory, _args) in SETS.items():
+            with self.subTest(set=name):
+                menu, guests = load(directory)
+                shared = json.dumps(menu, ensure_ascii=False)
+                people = {record.get("name") for record in guests}
+                people |= {seat.get("name") for record in guests for seat in record.get("seats", [])}
+                for person in people - {None}:
+                    self.assertFalse(support.occurs(person, shared), person)
+
+    def test_the_main_set_shows_every_part_of_the_format(self):
+        menu, guests = load(EXAMPLES / "data")
+        self.assertEqual(menu["invitationLink"]["href"], "/invite/{token}/")
+        self.assertEqual(len(menu["reservedSeats"]), 1)
+        self.assertEqual({tuple(item.get("audience", "all") for item in section.get("widgets", []))
+                          for section in menu["sections"] if section["id"] in ("starters", "drinks")},
+                         {("all", "staff"), ("guest", "staff")})
+        records = [record for record in guests if record.get("staff") is not True]
+        seats = [record["seats"] for record in records]
+        total = sum(1 for arm in menu["table"]["seats"] for _ in range(arm.get("count", 1)))
+        # a guest on the last seat with a +1 on the first one
+        self.assertIn([{"number": total}, {"number": 1, "plusOne": True, "name": "Hugo"}], seats)
+        # a record for two, a +1 without a name, a seat with two dietary notes
+        self.assertTrue(any(len(item) == 2 and "plusOne" not in item[1] for item in seats))
+        self.assertTrue(any(item[-1] == {"number": item[-1]["number"], "plusOne": True} for item in seats))
+        self.assertTrue(any(len(seat.get("requirements", [])) == 2 for item in seats for seat in item))
+        self.assertEqual(sum(1 for record in records if "sections" in record), 2)
+
+
+class ExamplePagesTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory(prefix="menu-examples-test-")
+        cls.addClassCleanup(temporary.cleanup)
+        cls.tmp = Path(temporary.name).resolve()
+        cls.built = {}
+        for name, (directory, args) in SETS.items():
+            out = cls.tmp / name
+            result = support.run_main("build", "--data", directory, "--out", out, *args)
+            if result.returncode != 0 or result.stderr:
+                raise AssertionError(result.stderr)
+            menu, guests = load(directory)
+            pages = {record["token"]: (out / record["token"] / "index.html").read_text(encoding="utf-8")
+                     for record in guests}
+            staff = next(record["token"] for record in guests if record.get("staff") is True)
+            cls.built[name] = (out, menu, guests, pages, staff)
+
+    def test_the_output_holds_the_pages_and_three_assets(self):
+        for name, (out, _menu, guests, _pages, _staff) in self.built.items():
+            with self.subTest(set=name):
+                expected = [f"{record['token']}/index.html" for record in guests]
+                expected += ["assets/app.css", "assets/app.js", "assets/favicon.svg"]
+                self.assertEqual(support.tree_files(out), sorted(expected))
+
+    def test_the_pages_keep_away_from_search_engines_and_previews(self):
+        for name, (_out, _menu, _guests, pages, _staff) in self.built.items():
+            for token, page in pages.items():
+                with self.subTest(set=name, page=token):
+                    self.assertEqual(page.count('<meta name="robots" content="noindex, nofollow">'), 1)
+                    self.assertNotRegex(page, r'(?i)<meta[^>]+(?:property|name)="og:')
+                    self.assertIn('<link rel="stylesheet" href="/menu/assets/app.css">', page)
+
+    def test_the_link_back_leads_to_the_own_invitation(self):
+        _out, _menu, guests, pages, staff = self.built["data"]
+        for record in guests:
+            links = re.findall(r'href="(/invite/[^"]*)"', pages[record["token"]])
+            with self.subTest(page=record["token"]):
+                self.assertEqual(links, [] if record["token"] == staff else [f"/invite/{record['token']}/"])
+        for token, page in self.built["data-plain"][3].items():
+            self.assertNotIn("/invite/", page)
+
+    def test_the_table_plan_is_drawn_where_there_is_a_table(self):
+        for name, (_out, menu, _guests, pages, staff) in self.built.items():
+            for token, page in pages.items():
+                with self.subTest(set=name, page=token):
+                    expected = 1 if "table" in menu else 0
+                    self.assertEqual(page.count('<svg class="scheme"'), expected)
+                    if expected:
+                        # the guest page names the drawing, the staff page hides it
+                        self.assertEqual('role="img"' in page, token != staff)
+        self.assertIn("table", self.built["data"][1])
+        self.assertNotIn("table", self.built["data-plain"][1])
+
+    def test_the_staff_bar_is_on_the_staff_page_alone(self):
+        for name, (_out, _menu, _guests, pages, staff) in self.built.items():
+            for token, page in pages.items():
+                with self.subTest(set=name, page=token):
+                    self.assertEqual("staff-bar" in page, token == staff)
+                    self.assertEqual("Staff version · not for guests" in page, token == staff)
+                    # the bar writes the word itself before the date of the data
+                    self.assertEqual(bool(re.search(r">updated \d{1,2} [A-Z][a-z]+ \d{4}<", page)), token == staff)
+                    self.assertNotIn("updated updated", page)
+                    self.assertIn('<html lang="en" class="menu menu--staff">' if token == staff
+                                  else '<html lang="en" class="menu menu--guest">', page)
+
+
+if __name__ == "__main__":
+    unittest.main()

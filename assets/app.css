@@ -1909,6 +1909,35 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
    ========================================================================== */
 
 @media print {
+  /* The head of a section never stays alone at the foot of a sheet: it goes
+     to the sheet of what follows it. It never splits either, or a browser
+     would leave the eyebrow behind and carry the title alone. */
+  .section__head {
+    break-inside: avoid;
+    break-after: avoid;
+  }
+
+  /* A shadow is a cue of depth on the screen: a browser prints the blur of
+     a rounded card as a grey rectangle behind it. On paper the hairline
+     border alone outlines a card. */
+  .card,
+  .text-widget--card {
+    box-shadow: none;
+  }
+
+  /* A dish (its name and the lines under it), a drink, a row of the staff
+     list of drinks, an inline group of drinks (its title and its one line)
+     and the staff footer never split across two sheets. A break between
+     the items of a grid ignores break-after, so the inline group keeps its
+     title by itself. */
+  .dish,
+  .drink,
+  .schedule__item,
+  .drinks__group--inline,
+  .staff-footer {
+    break-inside: avoid;
+  }
+
   /* Sets: no tabs, every card one after another, as without the script. */
   .sets__tabs {
     display: none;
@@ -1993,6 +2022,10 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   }
 
   .menu--staff .section {
+    margin-block: var(--space-md);
+  }
+
+  .menu--staff .page-footer {
     margin-block: var(--space-md);
   }
 

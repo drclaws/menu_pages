@@ -218,7 +218,7 @@ class GuestPageTest(unittest.TestCase):
             ],
         )
         link = widgets(tree, "link")[0]
-        self.assertEqual((link["href"], link["text"]), ("/i/crane-7m2p/", "← Back to the invitation"))
+        self.assertEqual((link["href"], link["text"]), ("/invite/crane-7m2p/", "← Back to the invitation"))
 
     def test_dom_ids_count_every_widget_of_the_data(self):
         boris = self.tree("Boris")

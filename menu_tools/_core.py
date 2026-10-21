@@ -146,7 +146,9 @@ check_token = _data.check_token
 generate_token = _data.generate_token
 generate_prefixed_token = _data.generate_prefixed_token
 check_token_prefix = _data.check_token_prefix
+RESERVED_TOKENS = _data.RESERVED_TOKENS
 json_type = _data.json_type
+format_size = _data.format_size
 
 # --- messages of the schema checks -------------------------------------------
 _Checker = _schema._Checker
@@ -162,8 +164,11 @@ check_base_path = _build.check_base_path
 check_allow_paths = _build.check_allow_paths
 assets_url_path = _build.assets_url_path
 base_path_argument = _build.base_path_argument
+allow_path_argument = _build.allow_path_argument
+MAX_REPORTED_PROBLEMS = _build.MAX_REPORTED_PROBLEMS
 redact_tokens = _build.redact_tokens
 display_path = _build.display_path
+NAME_MASK = _build.NAME_MASK
 check_out_dir = _build.check_out_dir
 check_replaceable = _build.check_replaceable
 copy_assets = _build.copy_assets
@@ -176,10 +181,15 @@ _StagedOutput = _build._StagedOutput
 parse_tokens = _tokens.parse_tokens
 load_palette = _tokens.load_palette  # of a style sheet (not `build.load_palette`)
 palette_from_tokens = _tokens.palette_from_tokens
+hex_color = _tokens.hex_color
+TokenError = _tokens.TokenError
 favicon_svg = _gen_assets.favicon_svg
 
 # --- command line ------------------------------------------------------------
 running_in_ci = _build.running_in_ci
+CI_ENVIRONMENT_VARIABLES = _build.CI_ENVIRONMENT_VARIABLES
+parse_published_url = _build.parse_published_url
+token_prefix = _build.token_prefix
 EXIT_OK = _build.EXIT_OK
 EXIT_ERROR = _build.EXIT_ERROR
 EXIT_USAGE = _build.EXIT_USAGE
@@ -215,7 +225,9 @@ __all__ = [
     "generate_token",
     "generate_prefixed_token",
     "check_token_prefix",
+    "RESERVED_TOKENS",
     "json_type",
+    "format_size",
     # schema messages
     "_Checker",
     "report_warning",
@@ -229,8 +241,11 @@ __all__ = [
     "check_allow_paths",
     "assets_url_path",
     "base_path_argument",
+    "allow_path_argument",
+    "MAX_REPORTED_PROBLEMS",
     "redact_tokens",
     "display_path",
+    "NAME_MASK",
     "check_out_dir",
     "check_replaceable",
     "copy_assets",
@@ -242,9 +257,14 @@ __all__ = [
     "parse_tokens",
     "load_palette",
     "palette_from_tokens",
+    "hex_color",
+    "TokenError",
     "favicon_svg",
     # command line
     "running_in_ci",
+    "CI_ENVIRONMENT_VARIABLES",
+    "parse_published_url",
+    "token_prefix",
     "EXIT_OK",
     "EXIT_ERROR",
     "EXIT_USAGE",

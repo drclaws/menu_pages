@@ -216,7 +216,7 @@ def _(menu, guests):
     errors=[M + "field 'invitationLink.href' must hold '{token}' exactly once (the page of the same guest)"],
 )
 def _(menu, guests):
-    menu["invitationLink"]["href"] = "/i/"
+    menu["invitationLink"]["href"] = "/invite/"
 
 
 @case(
@@ -224,7 +224,7 @@ def _(menu, guests):
     errors=[M + "field 'invitationLink.href' must be a path from the site root, starting with a single '/'"],
 )
 def _(menu, guests):
-    menu["invitationLink"]["href"] = "//i/{token}/"
+    menu["invitationLink"]["href"] = "//invite/{token}/"
 
 
 @case(
@@ -240,7 +240,7 @@ def _(menu, guests):
     errors=[M + "field 'sections[3].widgets[1].text' must not contain '{token}': it works only in 'invitationLink.href'"],
 )
 def _(menu, guests):
-    menu["sections"][3]["widgets"][1]["text"] = "Your page: /i/{token}/"
+    menu["sections"][3]["widgets"][1]["text"] = "Your page: /invite/{token}/"
 
 
 @case(
@@ -811,7 +811,7 @@ class TableMessagesTest(unittest.TestCase):
 
 class HrefTest(unittest.TestCase):
     def test_good_paths(self):
-        for href in ("/i/{token}/", "/{token}/", "/invite/{token}/menu/"):
+        for href in ("/invite/{token}/", "/{token}/", "/invite/{token}/menu/"):
             with self.subTest(href=href):
                 self.assertIsNone(_schema.href_problem(href))
 
@@ -820,15 +820,15 @@ class HrefTest(unittest.TestCase):
         segments = "may only hold path segments of A-Z, a-z, 0-9, '_' and '-', and '{token}' as a whole segment"
         once = "must hold '{token}' exactly once (the page of the same guest)"
         cases = {
-            "i/{token}/": root,
+            "invite/{token}/": root,
             "//{token}/": root,
-            "/i/{token}": "must end with '/'",
-            "/i/{token}/?a=1/": segments,
-            "/i/../{token}/": segments,
-            "/i/x{token}/": segments,
-            "/i/{token}#top/": segments,
-            "/i//{token}/": segments,
-            "/i/": once,
+            "/invite/{token}": "must end with '/'",
+            "/invite/{token}/?a=1/": segments,
+            "/invite/../{token}/": segments,
+            "/invite/x{token}/": segments,
+            "/invite/{token}#top/": segments,
+            "/invite//{token}/": segments,
+            "/invite/": once,
             "/{token}/{token}/": once,
         }
         for href, problem in cases.items():

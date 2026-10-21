@@ -1,18 +1,20 @@
 """The page template and the fragments against the contract of the page tree.
 
-The trees are written by hand (`tests/page_trees.py`).  Every node is wrapped
-in a `Strict` dict, which fails when a fragment asks for a field that its kind
-of node does not have, even inside an `if:`, and which records every field a
-fragment asks for: a field of the contract that no fragment reads has to be
-listed in `UNREAD` with its reason.  The pages are rendered the way the build
-publishes them (the comments removed) and go through the checks of the finished
-HTML of the invitations builder.
+The trees are written by hand (`tests/page_trees.py`) and built by the data
+layer (`menu_tools._page.build_trees`) from the data sets of
+`tests/fixtures.py`, so the fragments and the data layer cannot drift apart
+unnoticed.  Every node is wrapped in a `Strict` dict, which fails when a
+fragment asks for a field that its kind of node does not have, even inside an
+`if:`, and which records every field a fragment asks for: a field of the
+contract that no fragment reads has to be listed in `UNREAD` with its reason.
+The pages are rendered the way the build publishes them (the comments
+removed) and go through the checks of the finished HTML of the invitations
+builder.
 """
 
 from __future__ import annotations
 
 import collections
-import copy
 import re
 import sys
 import unittest
@@ -24,6 +26,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from menu_tools import _core as core  # noqa: E402  (imported after sys.path is prepared)
+from menu_tools import _page, _schema  # noqa: E402
+from tests import fixtures  # noqa: E402
 from tests import page_trees as T  # noqa: E402
 
 TEMPLATE = ROOT / "template.html"
@@ -888,6 +892,128 @@ class WidgetTests(unittest.TestCase):
         seats = self.section("guest-plus-one", "seats")
         self.assertNotIn("section__subtitle", seats)
         self.assertIn('<h2 class="section__title" id="s-seats--title">Your seats</h2>', seats)
+
+
+# --- the trees of the data layer ---------------------------------------------------
+
+def strings(value) -> list[str]:
+    """Every string of a tree, at any depth."""
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in strings(item)]
+    return [value] if isinstance(value, str) else []
+
+
+def staff_strings(tree: dict) -> set[str]:
+    """The texts that the fields for the staff only hold in a staff tree; of a
+    drink on the staff list only its line (its name and category are shared)."""
+    found = set()
+    for kind, value in T.nodes(tree):
+        for field, item in value.items():
+            if field_name(kind, field) in STAFF_ONLY and not T.CHILDREN.get((kind, field)):
+                found.update(strings(item))
+            elif kind == "widget:drinks" and field == "list":
+                found.update(drink["line"] for drink in item)
+    return {text for text in found if len(text) > 2}
+
+
+class DataLayerPageTests(unittest.TestCase):
+    """The pages of the trees that the data layer builds from the fixture data.
+
+    Every node is `Strict`: a field that a fragment reads and the data layer
+    does not build fails the rendering, even inside an `if:`.
+    """
+
+    pages: list[tuple[str, dict, str, set[str]]]
+    staff: dict[str, dict]
+
+    @classmethod
+    def setUpClass(cls):
+        template = core.load_template(TEMPLATE)
+        cls.pages, cls.staff = [], {}
+        for name, build in fixtures.SETS.items():
+            menu, guests = build()
+            report = core.Report()
+            _schema.check_data(menu, guests, report)
+            trees = _page.build_trees(menu, guests, report)
+            assert not report.errors, report.errors
+            assert trees.staff is not None, name
+            cls.staff[name] = trees.staff.tree
+            for page in trees.guests + [trees.staff]:
+                label = f"{name}: " + ("staff" if page.tree["isStaff"] else f"guest #{page.number}")
+                reads: set[str] = set()
+                document = render_strict(page.tree, template, reads)
+                cls.pages.append((label, page.tree, document, reads))
+
+    def test_every_page_renders_and_passes_the_checks_of_the_build(self):
+        self.assertEqual({label.split(":")[0] for label, *_rest in self.pages},
+                         set(fixtures.SETS))
+        self.assertGreater(len(self.pages), len(fixtures.SETS) * 2)
+        for label, _tree, document, _reads in self.pages:
+            with self.subTest(page=label):
+                core.check_rendered(document)
+                self.assertEqual(html_problems(document), [])
+                self.assertNotRegex(document, r"<[a-zA-Z][^>]*\sstyle\s*=")
+                self.assertNotRegex(document, r"(?i)<style[\s>]")
+
+    def test_the_nodes_have_exactly_the_fields_of_the_contract(self):
+        seen = set()
+        for label, tree, _document, _reads in self.pages:
+            for kind, value in T.nodes(tree):
+                seen.add(kind)
+                with self.subTest(page=label, node=kind):
+                    self.assertEqual(set(value), set(T.NODES[kind]))
+        # the data sets reach every kind of node, the scheme of the table too
+        self.assertEqual(seen, set(T.NODES))
+
+    def test_every_field_of_the_contract_is_read_or_listed(self):
+        reads = set().union(*(reads for *_rest, reads in self.pages))
+        self.assertEqual(reads & set(UNREAD), set())
+        self.assertEqual(CONTRACT - reads, set(UNREAD))
+
+    def test_each_page_reads_the_fields_of_its_audience_only(self):
+        for label, tree, _document, reads in self.pages:
+            other = GUEST_ONLY if tree["isStaff"] else STAFF_ONLY
+            with self.subTest(page=label):
+                self.assertEqual(reads & other, set())
+
+    def test_a_guest_page_shows_nothing_of_the_staff_page(self):
+        for label, tree, document, _reads in self.pages:
+            if tree["isStaff"]:
+                continue
+            text = visible_text(document)
+            classes = {value for found in re.findall(r'class="([^"]*)"', document)
+                       for value in found.split()}
+            own = strings(tree)
+            # a text of the staff tree that the guest's own tree also holds
+            # (the guest's name, a word of an ingredient) is no leak
+            hidden = {item for item in staff_strings(self.staff[label.split(":")[0]])
+                      if not any(item in mine for mine in own)}
+            with self.subTest(page=label):
+                self.assertTrue(hidden)
+                self.assertEqual(classes & set(STAFF_CLASSES), set())
+                for word in STAFF_WORDS:
+                    self.assertNotIn(word, text)
+                leaks = [item for item in hidden
+                         if re.search(r"(?<!\w)%s(?!\w)" % re.escape(item), text)]
+                self.assertEqual(leaks, [])
+
+    def test_ids_headings_and_reveal_marks(self):
+        for label, tree, document, _reads in self.pages:
+            outline = Outline(document)
+            custom = [section for section in tree["sections"] if section["type"] == "custom"]
+            with self.subTest(page=label):
+                self.assertEqual(len(outline.ids), len(set(outline.ids)))
+                self.assertEqual([target for _name, target in outline.references
+                                  if target not in outline.ids], [])
+                self.assertEqual(outline.headings.count(1), 1)
+                for previous, level in zip(outline.headings, outline.headings[1:]):
+                    self.assertLessEqual(level, previous + 1)
+                expected = 0 if tree["isStaff"] else len(custom)
+                self.assertEqual(len(outline.reveals), expected)
+                for _tag, attributes in outline.hidden:
+                    self.assertIn("data-tabs-tablist", attributes)
 
 
 if __name__ == "__main__":  # pragma: no cover

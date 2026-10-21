@@ -493,6 +493,14 @@
   --scheme-font-badge: 10px;
   --scheme-font-couple: 11px;
   --scheme-tracking-couple: 0.06em;
+  /* The weight of the numbers of the guest's seats, of the badges and of
+     the labels "You" and "+1". */
+  --scheme-font-weight-strong: 700;
+  /* Print in black and white: the orange border of a seat with a dietary
+     note is as light as the grey of a plain seat, so it prints thicker; the
+     ring of the guest's seat prints denser. */
+  --line-width-flag-print: 3.5px;
+  --seat-ring-opacity-print: 0.35;
 
   /* Set switcher: the smallest width of a tab. Two tabs stay in a row on a
      360px screen at the default font (16px, and 17px on iOS); with a larger
@@ -1719,8 +1727,129 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
 /* =============================================================================
    6. Scheme
    -----------------------------------------------------------------------------
-   The table scheme: an SVG of the table with its seats, flags and labels.
+   The table scheme: an inline SVG of the table with its seats, the badges of
+   the dietary notes and the labels of the guest's seats, in a field of
+   318 x 310 units. The markup holds the geometry alone; the colours, lines
+   and type are set here by class. The type sizes are px of the viewBox, so
+   they scale with the drawing. The radii of the seats depend on their
+   border widths (--line-width-seat, --line-width-flag); a test ties the
+   tokens to the numbers of the build. No text-transform here: the build
+   writes the couple label in capitals.
    ========================================================================== */
+
+/* The field: 318 units wide on a wide card. On a narrow card it first takes
+   the padding of the card, up to --seating-bleed-gap from its edge, and only
+   then shrinks with its ratio; it never scrolls. The negative margins give
+   it that room and the grid of the card centres it: its margin box is never
+   wider than the card, so it never overflows. The ring of a seat at the edge
+   of the field is drawn past it. */
+.scheme {
+  justify-self: center;
+  inline-size: min(var(--seating-width),
+    100% + var(--card-padding) + var(--card-padding)
+    - var(--seating-bleed-gap) - var(--seating-bleed-gap));
+  max-inline-size: none;
+  block-size: auto;
+  aspect-ratio: var(--seating-ratio);
+  margin-inline: calc(var(--seating-bleed-gap) - var(--card-padding));
+  overflow: visible;
+}
+
+/* The arms of the table: one outline, grey on grey. */
+.scheme__table {
+  fill: var(--color-surface-sunken);
+  stroke: var(--color-line);
+  stroke-width: var(--line-width-hairline);
+}
+
+/* The couple label inside its arm, centred on its point. */
+.scheme__couple {
+  fill: var(--color-text-muted);
+  font-size: var(--scheme-font-couple);
+  letter-spacing: var(--scheme-tracking-couple);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* A seat: a white circle in a grey border, its number in the middle. */
+.seat__circle {
+  fill: var(--color-bg);
+  stroke: var(--color-line-strong);
+  stroke-width: var(--line-width-seat);
+}
+
+.seat__number {
+  fill: var(--color-text);
+  font-size: var(--scheme-font-number);
+  font-weight: var(--font-weight-heading);
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* The couple's seats: grey in a dark border. */
+.seat--couple .seat__circle {
+  fill: var(--color-surface-sunken);
+  stroke: var(--color-couple-line);
+}
+
+/* A seat with a dietary note (staff page): a thicker orange border. */
+.seat--flagged .seat__circle {
+  stroke: var(--color-flag);
+  stroke-width: var(--line-width-flag);
+}
+
+/* The guest's own seat: a larger accent circle with a white number in a
+   translucent ring. */
+.seat--you .seat__circle {
+  fill: var(--color-accent);
+  stroke: var(--color-accent);
+}
+
+.seat--you .seat__number {
+  fill: var(--color-on-accent);
+  font-size: var(--scheme-font-number-you);
+  font-weight: var(--scheme-font-weight-strong);
+}
+
+.seat__ring {
+  fill: var(--color-accent);
+  fill-opacity: var(--seat-ring-opacity);
+}
+
+/* A badge of a dietary note: the letter of the legend in an orange circle. */
+.seat-badge__circle {
+  fill: var(--color-flag);
+}
+
+.seat-badge__letter {
+  fill: var(--color-on-flag);
+  font-size: var(--scheme-font-badge);
+  font-weight: var(--scheme-font-weight-strong);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* "You" and "+1" next to the guest's seats, anchored on the side the build
+   chose. */
+.seat-label {
+  fill: var(--color-accent);
+  font-size: var(--scheme-font-label);
+  font-weight: var(--scheme-font-weight-strong);
+  dominant-baseline: central;
+}
+
+.seat-label--start {
+  text-anchor: start;
+}
+
+.seat-label--end {
+  text-anchor: end;
+}
+
+.seat-label--middle {
+  text-anchor: middle;
+}
 
 
 /* =============================================================================
@@ -1813,11 +1942,45 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
     print-color-adjust: exact;
   }
 
-  /* The staff page is compact: the seating section (the scheme and the
-     table of sixteen seats) fits one A4 sheet with the header. A row of the
-     table never breaks across two sheets. */
+  /* The scheme: never split across two sheets, and the label of the guest's
+     seats under it stays with it (a break-after on the scheme would push
+     the whole row of the staff card, the table too, onto the next sheet).
+     Its fills are graphics, not backgrounds, yet a browser may still lighten
+     them: the badges, the guest's seats and the arms keep their colours. */
+  .scheme {
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .seating__meta {
+    break-before: avoid;
+  }
+
+  /* In black and white a seat with a dietary note differs from a plain one
+     by its thicker border (and its badge); the guest's seat stays dark with
+     a white number in a denser ring. */
+  .seat--flagged .seat__circle {
+    stroke-width: var(--line-width-flag-print);
+  }
+
+  .seat__ring {
+    fill-opacity: var(--seat-ring-opacity-print);
+  }
+
+  /* The staff page is compact and takes the whole width of the sheet: the
+     seating section fits the first A4 sheet with the header. The scheme and
+     the table of the seats stand side by side, the scheme on the left in its
+     natural size, the footnote under both, no rule between them; the whole
+     width leaves the table room for a row in one line. Without a scheme the
+     empty first column takes no room. A row of the table never breaks
+     across two sheets. */
   .menu--staff body {
     font-size: var(--text-base);
+  }
+
+  .menu--staff .container {
+    max-width: none;
   }
 
   .menu--staff .cover--staff {
@@ -1829,7 +1992,27 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   }
 
   .menu--staff .seating__card {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
     row-gap: var(--space-sm);
+  }
+
+  .menu--staff .seating__card > * {
+    grid-column: 1 / -1;
+  }
+
+  .menu--staff .seating__card > .scheme {
+    grid-column: 1;
+    inline-size: var(--seating-width);
+    margin-inline: 0 var(--space-md);
+  }
+
+  .menu--staff .seating__card > .seat-table {
+    grid-column: 2;
+  }
+
+  .menu--staff .seating__divider {
+    display: none;
   }
 
   .seat-table {

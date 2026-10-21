@@ -176,9 +176,6 @@ class StyleSheetTest(unittest.TestCase):
         self.assertNotIn(":hover", outside)
         self.assertIn(".sets__tab:hover", self.code)
 
-    def test_the_scheme_section_has_no_rules_yet(self):
-        self.assertEqual(self.section_code("6").strip(), "")
-
     def test_hidden_beats_the_display_of_components(self):
         self.assertEqual(rules(self.section_code("3"))["[hidden]"], "display: none !important;")
 
@@ -298,6 +295,121 @@ class MenuStylesTest(unittest.TestCase):
         self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
         self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
         self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
+
+
+def declarations(body: str) -> dict[str, str]:
+    """{property: value} of a rule body as `rules()` gives it."""
+    found = {}
+    for declaration in body.split(";"):
+        name, colon, value = declaration.partition(":")
+        if colon:
+            found[name.strip()] = " ".join(value.split())
+    return found
+
+
+class SchemeStylesTest(unittest.TestCase):
+    """The table scheme (section 6) and its print (section 8)."""
+
+    #: The parts of the drawing that have rules; seat--regular and seat--none
+    #: are modifiers of the enumerations that need none.
+    PARTS = (".scheme", ".scheme__table", ".scheme__couple", ".seat__circle", ".seat__number",
+             ".seat--couple .seat__circle", ".seat--flagged .seat__circle",
+             ".seat--you .seat__circle", ".seat--you .seat__number", ".seat__ring",
+             ".seat-badge__circle", ".seat-badge__letter", ".seat-label", ".seat-label--start",
+             ".seat-label--end", ".seat-label--middle")
+
+    @classmethod
+    def setUpClass(cls):
+        raw = APP_CSS.read_text(encoding="utf-8")
+        sections = section_texts(raw)
+        cls.code = strip_comments(sections["6"][1])
+        cls.scheme = {selector: declarations(body) for selector, body in rules(cls.code).items()}
+        cls.print = {selector: declarations(body) for selector, body in
+                     rules(media_blocks(strip_comments(sections["8"][1]), "print")[0]).items()}
+        cls.tokens = rules(strip_comments(sections["1a"][1]))[":root"]
+
+    def token(self, name: str) -> str:
+        return re.search(r"%s:\s*([^;]+);" % re.escape(name), self.tokens).group(1).strip()
+
+    def test_every_part_of_the_drawing_has_its_rule_and_nothing_else(self):
+        self.assertEqual(sorted(self.scheme), sorted(self.PARTS))
+        self.assertNotRegex(self.code, r"seat--regular|seat--none|@media|@container")
+
+    def test_the_field_fills_the_card_padding_then_shrinks(self):
+        field = self.scheme[".scheme"]
+        self.assertEqual(field["aspect-ratio"], "var(--seating-ratio)")
+        self.assertEqual(field["max-inline-size"], "none")
+        self.assertEqual(field["block-size"], "auto")
+        self.assertEqual(field["overflow"], "visible")
+        self.assertEqual(field["justify-self"], "center")
+        self.assertEqual(field["inline-size"],
+                         "min(var(--seating-width), 100% + var(--card-padding) + "
+                         "var(--card-padding) - var(--seating-bleed-gap) - "
+                         "var(--seating-bleed-gap))")
+        self.assertEqual(field["margin-inline"],
+                         "calc(var(--seating-bleed-gap) - var(--card-padding))")
+
+    def test_the_borders_of_the_seats_are_their_tokens(self):
+        self.assertEqual(self.scheme[".seat__circle"]["stroke-width"], "var(--line-width-seat)")
+        self.assertEqual(self.scheme[".seat--flagged .seat__circle"]["stroke-width"],
+                         "var(--line-width-flag)")
+        widths = {selector: values["stroke-width"] for selector, values in self.scheme.items()
+                  if "stroke-width" in values}
+        self.assertEqual(widths, {".scheme__table": "var(--line-width-hairline)",
+                                  ".seat__circle": "var(--line-width-seat)",
+                                  ".seat--flagged .seat__circle": "var(--line-width-flag)"})
+
+    def test_colours_and_type_are_tokens(self):
+        for selector, values in self.scheme.items():
+            for name, value in values.items():
+                with self.subTest(selector=selector, property=name):
+                    if name in ("fill", "stroke"):
+                        self.assertRegex(value, r"\Avar\(--color-[\w-]+\)\Z")
+                    if name == "font-size":
+                        self.assertRegex(value, r"\Avar\(--scheme-font-[\w-]+\)\Z")
+                    if name == "font-weight":
+                        self.assertIn(value, ("var(--font-weight-heading)",
+                                              "var(--scheme-font-weight-strong)"))
+        self.assertEqual(self.token("--scheme-font-weight-strong"), "700")
+        self.assertEqual(self.scheme[".seat__ring"]["fill-opacity"], "var(--seat-ring-opacity)")
+
+    def test_the_scheme_has_no_text_transform(self):
+        # the build writes the couple label in capitals: WebKit misplaces the
+        # letters of an SVG text with text-transform
+        self.assertNotIn("text-transform", self.code)
+
+    def test_print_keeps_the_scheme_whole_and_in_its_colours(self):
+        self.assertEqual(self.print[".scheme"], {"break-inside": "avoid",
+                                                 "-webkit-print-color-adjust": "exact",
+                                                 "print-color-adjust": "exact"})
+        self.assertEqual(self.print[".seating__meta"], {"break-before": "avoid"})
+        # the card itself may break: taller than the rest of a sheet it would
+        # move whole onto the next one
+        for selector, values in self.print.items():
+            if "seating" in selector:
+                with self.subTest(selector=selector):
+                    self.assertNotIn("break-inside", values)
+
+    def test_print_tells_a_flagged_seat_and_the_guest_seat_in_black_and_white(self):
+        self.assertEqual(self.print[".seat--flagged .seat__circle"],
+                         {"stroke-width": "var(--line-width-flag-print)"})
+        self.assertEqual(self.print[".seat__ring"],
+                         {"fill-opacity": "var(--seat-ring-opacity-print)"})
+        self.assertGreater(float(self.token("--line-width-flag-print").removesuffix("px")),
+                           float(self.token("--line-width-flag").removesuffix("px")))
+        self.assertGreater(float(self.token("--seat-ring-opacity-print")),
+                           float(self.token("--seat-ring-opacity")))
+
+    def test_print_of_the_staff_page_sets_the_scheme_beside_the_table(self):
+        card = ".menu--staff .seating__card"
+        self.assertEqual(self.print[card]["grid-template-columns"], "auto minmax(0, 1fr)")
+        self.assertEqual(self.print[f"{card} > *"], {"grid-column": "1 / -1"})
+        self.assertEqual(self.print[f"{card} > .scheme"],
+                         {"grid-column": "1", "inline-size": "var(--seating-width)",
+                          "margin-inline": "0 var(--space-md)"})
+        self.assertEqual(self.print[f"{card} > .seat-table"], {"grid-column": "2"})
+        self.assertEqual(self.print[".menu--staff .seating__divider"], {"display": "none"})
+        self.assertEqual(self.print[".menu--staff .container"], {"max-width": "none"})
 
 
 if __name__ == "__main__":

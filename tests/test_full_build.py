@@ -104,17 +104,10 @@ class FullBuildTest(BuildTestCase):
                 f"build: 12 guest record(s) + staff validated (data: {_core.display_path(data)})",
                 f"build: wrote 13 page(s) to {shown}/<token>/",
                 "build: base path /menu: the pages are at /menu/<token>/, the shared files at /menu/assets/",
-                "build: links allowed outside the output: none",
                 f"build: copied 2 asset file(s) to {shown}/assets/, favicon.svg generated from the design tokens",
             ],
         )
         self.assertRegex(lines[-1], rf"^build: OK -> {re.escape(shown)} \(13 page\(s\), 16 file\(s\) in total, ")
-
-    def test_without_a_link_back_nothing_is_allowed(self):
-        menu, guests = fixtures.plain()
-        result = self.build(self.write("plain", menu, guests), self.tmp / "out")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("build: links allowed outside the output: none\n", result.stdout)
 
     def test_the_addresses_follow_the_base_path(self):
         menu, guests = fixtures.reserved19()
@@ -313,17 +306,6 @@ class FailingBuildTest(BuildTestCase):
             [line.split(":", 3)[:3] for line in lines[:-1]],
             [["error", " guests.json", " guest #4"], ["error", " guests.json", " guest #6"],
              ["error", " guests.json", " guest #13"]],
-        )
-        self.assert_quiet_about(result, self.menu, self.guests)
-        self.assert_kept()
-
-    def test_a_refused_allowed_path_after_the_data_is_read(self):
-        result = self.build(self.data, self.out, "--allow-path", f"/{self.guests[0]['token'].upper()}")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            result.stderr,
-            "error: an allowed path (--allow-path) must not lead into the directory of a page of the output: "
-            "the addresses there are files of the output and are checked against them\nbuild: failed\n",
         )
         self.assert_quiet_about(result, self.menu, self.guests)
         self.assert_kept()

@@ -207,7 +207,6 @@ class ExportsTest(unittest.TestCase):
     def test_the_argument_types_keep_good_values(self):
         self.assertEqual(core.token_prefix("heron"), "heron")
         self.assertEqual(core.parse_published_url("https://example.org/menu/"), "https://example.org/menu")
-        self.assertEqual(core.allow_path_argument("/invite/"), "/invite")
         self.assertEqual(core.base_path_argument("/menu"), "/menu")
 
     def test_the_argument_types_do_not_repeat_the_value(self):
@@ -219,7 +218,7 @@ class ExportsTest(unittest.TestCase):
             (core.parse_published_url, "https://wendell:hunter-secret@example.org/menu"),
             (core.parse_published_url, "ftp://bjarne-host.example.org/menu"),
             (core.parse_published_url, "https://example.org/menu?judy=1"),
-            (core.allow_path_argument, "/rosalind path"),
+            (core.base_path_argument, "/rosalind path"),
             (core.base_path_argument, "/leopold path"),
         )
         for convert, value in cases:
@@ -266,7 +265,7 @@ class WithoutTheSubmoduleTest(unittest.TestCase):
         (self.root / "site").mkdir()
         commands = (
             ("build",),
-            ("build", "--base-path", "/menu", "--allow-path", "/invite"),
+            ("build", "--base-path", "/menu"),
             ("validate",),
             ("links", "--url", "https://example.org/menu"),
             ("token",),

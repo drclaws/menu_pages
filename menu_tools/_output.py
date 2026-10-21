@@ -3,8 +3,9 @@
 The output is checked by the invitations' `check_output` without a media
 directory: its allow-list then holds the layout of the menu, a directory
 `<token>/` with `index.html` for every page and `assets/` with the files of
-the code.  Links under `allow_paths` (`build --allow-path`) are allowed and
-not looked up; resources there are errors.
+the code.  Every local address of a page, a link as well as a resource, has
+to lie under the base path and name a file of the output: a page that leads
+to another part of the site is an error.
 
 On top of that, `assets/` holds `app.css`, `app.js` and `favicon.svg` and
 nothing else (any other file of the code that would be published, a font or
@@ -25,7 +26,7 @@ import os
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from menu_tools import _core
 
@@ -154,28 +155,20 @@ def _limited(problems: list[str], hidden: int) -> list[str]:
     return problems
 
 
-def check_menu_output(
-    out_dir: Path | str,
-    pages: Iterable[str],
-    *,
-    base_path: str,
-    allow_paths: Sequence[str] = (),
-) -> "_core.OutputStats":
-    """Check a finished output directory of the menu; `pages` are the tokens
-    of every page (the guests and the staff).
+def check_menu_output(out_dir: Path | str, pages: Iterable[str], *, base_path: str) -> "_core.OutputStats":
+    """Check a finished output directory of the menu published under
+    `base_path`; `pages` are the tokens of every page (the guests and the
+    staff).
 
     The invitations' `check_output` with no media directory, then the files
     of `assets/` and the `style` attributes of the pages; every problem
-    together raises one `OutputError`.  A value of `allow_paths` that
-    `check_allow_paths` refuses raises `ValueError` before anything is read.
+    together raises one `OutputError`.
     """
     problems: list[str] = []
     hidden = 0
     stats = None
     try:
-        stats = _core.check_output(
-            out_dir, list(pages), media_dir="", base_path=base_path, allow_paths=allow_paths
-        )
+        stats = _core.check_output(out_dir, list(pages), media_dir="", base_path=base_path)
     except _core.OutputError as exc:
         problems = list(exc.errors)
         more = _MORE_RE.match(problems[-1]) if problems else None

@@ -273,7 +273,10 @@ class TreeTests(unittest.TestCase):
         trees = T.all_trees()
         plus_one = widgets_of(trees["guest-plus-one"], "seating")[0]
         self.assertEqual([(seat["number"], seat["mark"]) for seat in plus_one["mySeats"]],
-                         [(8, "You"), (9, "+1")])
+                         [(8, "you"), (9, "plusOne")])
+        marks = {seat["mark"] for tree in trees.values() for widget in widgets_of(tree, "seating")
+                 for seat in widget["mySeats"]}
+        self.assertEqual(marks, set(T.MY_SEAT_MARKS))
         self.assertIsNone(plus_one["scheme"])
         alone = widgets_of(trees["guest-without-table"], "seating")[0]
         self.assertEqual((alone["seatLabel"], alone["scheme"]), ("Seat 1", None))

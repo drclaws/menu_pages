@@ -91,6 +91,10 @@ CHILDREN = {
     ("scheme", "labels"): "schemeLabel",
 }
 
+#: The marks of the guest's own seats (`mySeats[].mark`): codes, not words;
+#: the page shows the words "You" and "+1" on the scheme.
+MY_SEAT_MARKS = ("you", "plusOne", "none")
+
 #: Checked enumerations: the only fields a class modifier may come from.
 ENUMS = {
     "variant": ("body", "lead", "card", "signature"),
@@ -323,7 +327,7 @@ def guest_plus_one() -> dict:
     return root(staff_page=False, sections=[
         cover(),
         section("seats", "Your seats", widgets=[seating(
-            "seats", my_seats=((8, "You"), (9, "+1")), seat_label="Seats 8 & 9",
+            "seats", my_seats=((8, "you"), (9, "plusOne")), seat_label="Seats 8 & 9",
             who_label="Olga and your guest")]),
         section("starters", "Starters", "Shared plates for the table", widgets=[
             widget("dishes", "starters", 1, title="", items=dishes(STARTERS, False))]),
@@ -351,7 +355,7 @@ def guest_without_table() -> dict:
                    variant="body"),
         ]),
         section("seats", "Your seat", widgets=[seating(
-            "seats", my_seats=((1, "You"),), seat_label="Seat 1", who_label="Klara")]),
+            "seats", my_seats=((1, "you"),), seat_label="Seat 1", who_label="Klara")]),
         section("starters", "Starters", widgets=[
             widget("dishes", "starters", 1, title="For the table",
                    items=dishes(PLAIN_STARTERS, False))]),
@@ -369,7 +373,7 @@ def guest_pair() -> dict:
     return root(staff_page=False, sections=[
         cover(),
         section("seats", "Your seats", widgets=[seating(
-            "seats", my_seats=((12, "You"), (13, "")), seat_label="Seats 12 & 13",
+            "seats", my_seats=((12, "you"), (13, "none")), seat_label="Seats 12 & 13",
             who_label="Peggy and Victor")]),
         section("main", "Main course", widgets=[
             widget("sets", "main", 1, items=sets("s-main--w1", SETS[:1], False), note="",

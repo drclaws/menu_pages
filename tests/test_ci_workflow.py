@@ -1,6 +1,11 @@
 """Static checks of the CI workflow text (no YAML parser required)."""
 
+import os
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -14,6 +19,24 @@ ALLOWED_EXPRESSIONS = re.compile(
 
 #: The extensions of media files that must never be tracked.
 MEDIA_PATTERN = r"'\.(png|jpe?g|webp|gif|avif|mp4|mov|webm|ico|svg)$'"
+
+HYGIENE = "Repository hygiene (no tracked media, no tracked build output)"
+NO_CYRILLIC = "No Cyrillic in tracked files"
+UNIT_TESTS = "Unit tests"
+CLEAN_TREE = "Working tree stays clean"
+
+#: The steps, in their order.
+STEP_NAMES = [
+    "Check out the repository",
+    "Set up Python ${{ matrix.python }}",
+    HYGIENE,
+    NO_CYRILLIC,
+    UNIT_TESTS,
+    CLEAN_TREE,
+]
+
+#: A Cyrillic letter, made from its code point: this file stays free of them too.
+CYRILLIC_LETTER = chr(0x436)
 
 
 def strip_comments(text):
@@ -106,6 +129,38 @@ def steps(text):
     return items
 
 
+def step_names(text):
+    """The values of the ``- name:`` lines of the steps, in their order."""
+    return re.findall(r"(?m)^\s*-\s+name:\s*(.*?)\s*$", text)
+
+
+def named_runs(text):
+    """{step name: body of its ``run:`` command}; a command belongs to the name before it.
+
+    Only a ``run:`` with a value is a command (``defaults: run:`` is a mapping).
+    """
+    runs = {}
+    name = None
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        named = re.match(r"^\s*-\s+name:\s*(.*?)\s*$", line)
+        if named:
+            name = named.group(1)
+        elif re.match(r"^\s*(?:-\s+)?run:\s*\S", line):
+            runs[name] = run_blocks("\n".join(lines[index:]))[0]
+    return runs
+
+
+def inline_python(block):
+    """The programs of the ``python -c '...'`` commands of a ``run: |`` block.
+
+    The block is dedented as YAML does; a program runs from the line after
+    ``python -c '`` up to a line that is a lone ``'``.
+    """
+    script = textwrap.dedent(block.partition("\n")[2])
+    return re.findall(r"(?ms)python -c '\n(.*?)^'$", script)
+
+
 class CiWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -113,6 +168,7 @@ class CiWorkflowTest(unittest.TestCase):
         cls.text = strip_comments(cls.raw)
         cls.runs = run_blocks(cls.raw)
         cls.steps = steps(cls.text)
+        cls.named = named_runs(cls.raw)
 
     def test_single_workflow_file(self):
         names = sorted(path.name for path in WORKFLOWS.iterdir()
@@ -214,10 +270,28 @@ class CiWorkflowTest(unittest.TestCase):
             r"  cancel-in-progress: \$\{\{ github\.ref != 'refs/heads/main' \}\}$",
         )
 
+    def test_the_steps_and_their_order(self):
+        self.assertEqual(step_names(self.raw), STEP_NAMES)
+        self.assertEqual(list(self.named), [HYGIENE, NO_CYRILLIC, UNIT_TESTS, CLEAN_TREE])
+        # every command is one of these (the other `run:` is the mapping of `defaults`)
+        commands = [block for block in self.runs if block.startswith("|")]
+        self.assertEqual(commands, list(self.named.values()))
+        self.assertEqual(len(commands), len(self.runs) - 1)
+
+    def test_checkout_fetches_the_submodule(self):
+        checkout = [step for step in self.steps
+                    if any("actions/checkout@" in line for line in step)]
+        self.assertEqual(len(checkout), 1)
+        keys = [line.strip() for line in checkout[0]]
+        self.assertIn("submodules: true", keys)
+        # one level is enough: the submodule has no submodules of its own
+        self.assertEqual(re.findall(r"submodules:\s*(\S*)", self.text), ["true"])
+
     def test_hygiene_checks_every_tracked_file_for_media(self):
         hygiene = [block for block in self.runs if "ls-files" in block]
-        self.assertEqual(len(hygiene), 1)
-        block = hygiene[0]
+        self.assertEqual(len(hygiene), 2)
+        block = self.named[HYGIENE]
+        self.assertIn(block, hygiene)
         listings = re.findall(r"git\b.*?\bls-files\b[^|)]*", block)
         self.assertGreaterEqual(len(listings), 2)
         for listing in listings:
@@ -229,14 +303,79 @@ class CiWorkflowTest(unittest.TestCase):
         self.assertIn('output="$(tracked dist)"', block)
         self.assertEqual(block.count("exit 1"), 3)
 
-    def test_unit_tests_run_after_the_hygiene_check(self):
-        hygiene = [i for i, block in enumerate(self.runs) if "ls-files" in block]
-        tests = [i for i, block in enumerate(self.runs) if "python -m unittest" in block]
-        self.assertEqual(len(tests), 1)
-        self.assertLess(hygiene[0], tests[0])
+    def test_cyrillic_check_lists_every_tracked_file_and_only_this_repository(self):
+        block = self.named[NO_CYRILLIC]
+        self.assertIn("set -euo pipefail", block)
+        listings = re.findall(r"git\b.*?\bls-files\b[^|]*\|", block)
+        # the whole listing: no path, no filter, not into the submodule
+        self.assertEqual(listings, ["git ls-files -z |"])
+        self.assertIn("git ls-files -z | python -c '", block)
+        self.assertNotIn("recurse-submodules", block)
+        # Python, not `git grep -P` (PCRE is not in every build of git)
+        self.assertNotRegex(block, r"\bgrep\b")
+        self.assertEqual(len(inline_python(block)), 1)
+
+    def test_cyrillic_check_program(self):
+        program = inline_python(self.named[NO_CYRILLIC])[0]
+        # the whole Cyrillic block of Unicode, by code point
+        self.assertIn("0x400 <= ord(char) <= 0x4FF", program)
+        self.assertTrue(program.isascii())
+        self.assertNotIn("'", program)  # the program is one single-quoted shell word
+        # one report at the end, on stderr; what it holds is checked below
+        self.assertEqual(len(re.findall(r"\bprint\(", program)), 1)
+        self.assertIn("file=sys.stderr", program)
+        self.assertIn("sys.exit(1)", program)
+
+    def test_cyrillic_check_prints_the_names_and_line_numbers_only(self):
+        program = inline_python(self.named[NO_CYRILLIC])[0]
+        with tempfile.TemporaryDirectory(prefix="menu-ci-test-") as temporary:
+            work = Path(temporary)
+            (work / "clean.txt").write_text("plain\ntext\n", encoding="utf-8")
+            (work / "mixed.txt").write_text(
+                f"first\nsecond {CYRILLIC_LETTER}\nthird\n{CYRILLIC_LETTER}\n", encoding="utf-8")
+            (work / "submodule").mkdir()  # a gitlink is a directory: never entered
+            (work / "submodule" / "inner.txt").write_text(CYRILLIC_LETTER, encoding="utf-8")
+            (work / f"name-{CYRILLIC_LETTER}.txt").write_text("plain\n", encoding="utf-8")
+            # Cyrillic in another encoding: no Cyrillic letter once read as UTF-8
+            (work / "legacy.txt").write_bytes(f"first\n{CYRILLIC_LETTER}\n".encode("cp1251"))
+
+            def check(*names):
+                listing = b"".join((name if isinstance(name, bytes) else name.encode("utf-8"))
+                                   + b"\0" for name in names)
+                environ = dict(os.environ, PYTHONIOENCODING="utf-8")
+                return subprocess.run([sys.executable, "-c", program], cwd=str(work),
+                                      env=environ, input=listing, capture_output=True)
+
+            clean = check("clean.txt", "submodule")
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            self.assertEqual(clean.stdout + clean.stderr, b"")
+
+            found = check("clean.txt", "mixed.txt", "submodule", f"name-{CYRILLIC_LETTER}.txt",
+                          "legacy.txt", b"name-\xe6.txt")
+            self.assertEqual(found.returncode, 1)
+            self.assertEqual(found.stdout, b"")
+            self.assertEqual(found.stderr.decode("utf-8").splitlines(), [
+                "Tracked files must be UTF-8 without Cyrillic:",
+                "mixed.txt:2",
+                "mixed.txt:4",
+                f"name-{CYRILLIC_LETTER}.txt: in the file name",
+                "legacy.txt: not UTF-8",
+                "name-\N{REPLACEMENT CHARACTER}.txt: not UTF-8",
+            ])
+
+            legacy = check("clean.txt", "legacy.txt")
+            self.assertEqual(legacy.returncode, 1)
+            self.assertEqual(legacy.stderr.decode("utf-8").splitlines()[1:], ["legacy.txt: not UTF-8"])
+
+    def test_unit_tests_discover_the_tests_package(self):
+        tests = [block for block in self.runs if "unittest" in block]
+        self.assertEqual(tests, [self.named[UNIT_TESTS]])
+        commands = [line.strip() for line in tests[0].splitlines()[1:] if line.strip()]
+        self.assertEqual(commands, ["set -euo pipefail", "python -m unittest discover -s tests -t ."])
 
     def test_working_tree_stays_clean_at_the_end(self):
         last = self.runs[-1]
+        self.assertEqual(last, self.named[CLEAN_TREE])
         self.assertIn('status="$(git status --porcelain)"', last)
         self.assertIn("exit 1", last)
 

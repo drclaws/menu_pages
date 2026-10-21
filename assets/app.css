@@ -9,7 +9,12 @@
      3.  Base               - reset, typography, accessibility
      4.  Layout primitives  - container, grid, vertical rhythm
      5.  Components         - section head, prose, card, button, time label,
-                              divider, label-and-text list, set switcher
+                              divider, label-and-text list, note line, pills,
+                              legend, seat table, seating, text widget, dish
+                              list, drinks, staff bar and footer, set
+                              switcher, set card
+     5a. Page               - compact cover, staff header, the audience:
+                              alignment and type size
      6.  Scheme             - the table scheme
      7.  Motion & reveal    - blocks appearing on scroll
      8.  Print              - print rules of the components
@@ -790,6 +795,24 @@ hr {
   text-align: center;
 }
 
+/* The head of a menu section: the title, then its eyebrow under it. The
+   blocks of the body stand one --space-md apart. */
+.section__head {
+  margin-block-end: var(--space-md);
+}
+
+.section__head .section__title {
+  margin-block-end: 0;
+}
+
+.section__head .section__subtitle {
+  margin-block: var(--space-2xs) 0;
+}
+
+.section__body {
+  --flow-space: var(--space-md);
+}
+
 /* --- Prose ------------------------------------------------------------------ */
 .prose {
   max-width: var(--container-text);
@@ -1047,6 +1070,366 @@ a.btn[aria-disabled="true"] {
   }
 }
 
+/* A ruled list: every item between two hairlines, no gap between items. */
+.schedule--ruled .schedule__list {
+  row-gap: 0;
+}
+
+.schedule--ruled .schedule__item {
+  padding-block: var(--space-xs);
+  border-block-start: var(--line-width-hairline) solid var(--color-line);
+}
+
+.schedule--ruled .schedule__item:last-child {
+  border-block-end: var(--line-width-hairline) solid var(--color-line);
+}
+
+/* --- Note line: a short muted line under a block ---------------------------- */
+.note-line {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* --- Pills ------------------------------------------------------------------
+   Short labels in a row (.pills, a list). .pill is grey (a tag, "no
+   restrictions"), .pill--flag orange (a dietary need, an allergen),
+   .pill--plain white (a counter of the staff header). An empty row takes no
+   room. */
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs) var(--space-2xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pills:empty {
+  display: none;
+}
+
+.pill {
+  display: inline-block;
+  padding: calc(var(--space-3xs) / 2) var(--space-2xs);
+  border: var(--line-width-hairline) solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+}
+
+.pill--flag {
+  border-color: var(--color-flag-line);
+  background-color: var(--color-flag-bg);
+  color: var(--color-flag-text);
+  font-weight: var(--font-weight-heading);
+}
+
+.pill--plain {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* --- Legend: the letters of the dietary needs (staff page) -------------------
+   The letter sits in an orange circle, as on the badges of the scheme; all
+   circles share one colour and differ by the letter alone. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: var(--line-height-tight);
+}
+
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.legend__mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--icon-size);
+  block-size: var(--icon-size);
+  border-radius: var(--radius-round);
+  background-color: var(--color-flag);
+  color: var(--color-on-flag);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-heading);
+}
+
+/* --- Seat table (staff page) -------------------------------------------------
+   Two columns: the number in a frame (grey for the couple) and the guest
+   with the role and the pills. The rows are ruled; the number column is as
+   narrow as its content. The cell holds a wrapper for the flex row, so the
+   cell keeps its table semantics. */
+.seat-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.seat-table th {
+  padding-block-end: var(--space-2xs);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-body);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--tracking-caps);
+  text-align: start;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.seat-table td {
+  padding-block: var(--space-2xs);
+  border-block-start: var(--line-width-hairline) solid var(--color-line);
+  vertical-align: middle;
+}
+
+.seat-table tbody tr:last-child td {
+  border-block-end: var(--line-width-hairline) solid var(--color-line);
+}
+
+.seat-table__no {
+  inline-size: 1%;
+  padding-inline-end: var(--space-xs);
+  white-space: nowrap;
+}
+
+.seat-number {
+  display: inline-flex;
+  justify-content: center;
+  min-inline-size: calc(var(--tap-min) * 0.75);
+  padding-block: calc(var(--space-3xs) * 0.75);
+  border: var(--line-width-hairline) solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-number--couple {
+  border-color: var(--color-line-strong);
+  background-color: var(--color-surface-sunken);
+}
+
+.seat-table__guest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3xs) var(--space-2xs);
+}
+
+.seat-table__name {
+  font-weight: var(--font-weight-heading);
+}
+
+.seat-table__role,
+.seat-table__free {
+  color: var(--color-text-muted);
+}
+
+/* --- Seating ------------------------------------------------------------------
+   A card with the scheme and, under it, the label of the guest's seats or
+   the table of the seats; on the staff page the legend stands above it. */
+.seating {
+  display: grid;
+  row-gap: var(--space-sm);
+}
+
+.seating__card {
+  display: grid;
+  row-gap: var(--space-md);
+}
+
+.seating__divider {
+  margin-block: 0;
+}
+
+.seating__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-xs);
+}
+
+.seating__seats {
+  padding: var(--space-3xs) var(--space-xs);
+  font-weight: var(--font-weight-heading);
+}
+
+.seating__who {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* --- Text widget: variants body | lead | card | signature ------------------- */
+.text-widget--lead {
+  font-size: var(--text-md);
+}
+
+.text-widget--card {
+  padding: var(--card-padding);
+  border: var(--line-width-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.text-widget--signature {
+  font-family: var(--font-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-heading);
+  line-height: var(--line-height-heading);
+  letter-spacing: var(--tracking-heading);
+}
+
+/* --- Dish list -----------------------------------------------------------------
+   A dish is its name and the lines under it: the ingredients for the guest;
+   the pills, the swaps and the note of the kitchen for the staff. A title in
+   small capitals may stand over the list. */
+.dishes {
+  display: grid;
+  row-gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dishes__title {
+  margin-block-end: var(--space-xs);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.dish {
+  display: flex;
+  flex-direction: column;
+  row-gap: var(--space-3xs);
+}
+
+.dish__name {
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+}
+
+.dish__ingredients {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* --- Drinks ----------------------------------------------------------------------
+   The guest page: groups under small capitals, an inline group is one line,
+   a list group names each drink under the label of its category. The staff
+   page: one ruled label-and-text list (.schedule--ruled). */
+.drinks > * + * {
+  margin-block-start: var(--space-lg);
+}
+
+.drinks > .drinks__note {
+  margin-block-start: var(--space-md);
+}
+
+.drinks__group {
+  display: grid;
+  row-gap: var(--space-2xs);
+}
+
+.drinks__group--list {
+  row-gap: var(--space-sm);
+}
+
+.drinks__title {
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.drinks__list {
+  display: grid;
+  row-gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drink {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  row-gap: var(--space-3xs);
+}
+
+.drink__name {
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+}
+
+.drinks__staff .schedule__name {
+  font-size: inherit;
+  font-weight: var(--font-weight-heading);
+}
+
+/* --- Staff bar: the top line of the staff page -------------------------------- */
+.staff-bar {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.staff-bar__inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3xs) var(--space-xs);
+  padding-block: var(--space-2xs);
+  font-size: var(--text-xs);
+  line-height: var(--line-height-tight);
+}
+
+.staff-bar__title {
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.staff-bar__updated {
+  font-weight: var(--font-weight-medium);
+}
+
+/* --- Staff footer: the contact on the night ----------------------------------- */
+.page-footer {
+  margin-block: var(--space-section);
+}
+
+.staff-footer {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.staff-footer > * + * {
+  margin-block-start: var(--space-3xs);
+}
+
+.staff-footer__contact {
+  font-weight: var(--font-weight-heading);
+  color: var(--color-text);
+}
+
 /* --- Set switcher -------------------------------------------------------------
    Markup: .sets[data-tabs] > .sets__tabs[data-tabs-tablist][hidden] with
    .sets__tab buttons, then .sets__panels > .sets__panel[data-tabs-panel].
@@ -1152,6 +1535,179 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
   visibility: hidden;
 }
 
+/* --- Set card -------------------------------------------------------------------
+   The title with its eyebrow on one line (the eyebrow wraps under a long
+   title), the courses numbered by a counter of the list, then the pairing
+   and, on the staff page, the swaps, each under a hairline. The note of the
+   widget stands under the cards. */
+.sets__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3xs) var(--space-xs);
+  margin-block-end: var(--space-sm);
+}
+
+.sets__eyebrow {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.sets__courses {
+  row-gap: var(--space-xs);
+  counter-reset: course;
+}
+
+.sets__courses > .dish {
+  display: grid;
+  grid-template-columns: calc(var(--tap-min) * 0.7) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--space-xs);
+  row-gap: var(--space-3xs);
+  counter-increment: course;
+}
+
+.sets__courses > .dish::before {
+  content: counter(course);
+  display: inline-flex;
+  justify-content: center;
+  padding-block: calc(var(--space-3xs) * 0.75);
+  border: var(--line-width-hairline) solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+}
+
+.sets__courses > .dish > * {
+  grid-column: 2;
+}
+
+.sets__courses .dish__name {
+  font-size: var(--text-base);
+}
+
+.sets__pairing,
+.sets__swaps {
+  margin-block-start: var(--space-sm);
+  padding-block-start: var(--space-xs);
+  border-block-start: var(--line-width-hairline) solid var(--color-line);
+}
+
+.sets__swaps > * + * {
+  margin-block-start: var(--space-3xs);
+}
+
+.sets__note {
+  margin-block-start: var(--space-md);
+}
+
+
+/* =============================================================================
+   5a. Page
+   -----------------------------------------------------------------------------
+   The frame of a menu page: the compact cover, the staff header and what
+   depends on the audience. The html element carries menu--guest or
+   menu--staff. The guest page is centred, like an invitation, while the
+   contents of cards start at the left edge; the staff page starts at the
+   left edge everywhere, and its text is one step larger (17px at the
+   default size on a phone) and its dish names bolder: the page is held in
+   the hand in a dim room.
+   ========================================================================== */
+
+/* --- Cover: compact, not a whole screen --------------------------------------- */
+.cover {
+  padding-block: var(--space-xl) var(--space-lg);
+  background-color: var(--color-surface);
+}
+
+.cover__eyebrow {
+  margin-block-end: var(--space-2xs);
+}
+
+.cover__divider {
+  margin-block: var(--space-md);
+}
+
+.cover__when {
+  font-size: var(--text-md);
+  line-height: var(--line-height-tight);
+  color: var(--color-text-muted);
+}
+
+.cover__place {
+  margin-block-start: var(--space-3xs);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* --- Staff header: the cover of the staff page, with the counters ------------- */
+.cover--staff {
+  padding-block: var(--space-md);
+  border-block-end: var(--line-width-hairline) solid var(--color-line);
+}
+
+.cover--staff .cover__title {
+  font-size: var(--text-xl);
+}
+
+.cover--staff .cover__place {
+  margin-block-start: var(--space-2xs);
+}
+
+.cover__counters {
+  margin-block-start: var(--space-sm);
+}
+
+.cover__counters .pill {
+  padding: var(--space-3xs) var(--space-2xs);
+  font-size: var(--text-sm);
+}
+
+/* --- The audience ----------------------------------------------------------------
+   The staff text: --text-base scaled by the ratio of its desktop and mobile
+   sizes, 17px at a 16px root. */
+.menu--guest .cover,
+.menu--guest .section {
+  text-align: center;
+}
+
+.menu--guest .card,
+.menu--guest .text-widget--card {
+  text-align: start;
+}
+
+.menu--guest .drink {
+  align-items: center;
+}
+
+.menu--staff body {
+  font-size: calc(var(--text-base) * var(--text-base-desktop) / var(--text-base-mobile));
+}
+
+.menu--staff .dishes-widget .dishes {
+  row-gap: 0;
+}
+
+.menu--staff .dishes-widget .dish {
+  padding-block: var(--space-xs);
+  border-block-start: var(--line-width-hairline) solid var(--color-line);
+}
+
+.menu--staff .dishes-widget .dish:last-child {
+  border-block-end: var(--line-width-hairline) solid var(--color-line);
+}
+
+.menu--staff .dish__name {
+  font-size: inherit;
+  font-weight: var(--font-weight-heading);
+}
+
 
 /* =============================================================================
    6. Scheme
@@ -1231,5 +1787,57 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
 
   html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel + .sets__panel {
     margin-block-start: var(--space-lg);
+  }
+
+  .sets__panel {
+    break-inside: avoid;
+  }
+
+  /* Colours that are backgrounds: a browser leaves them out of print by
+     default, and the white letter of a legend circle, the orange of a pill,
+     the label of the guest's seats and the staff bar would print white on
+     white. */
+  .legend__mark,
+  .pill,
+  .time-label--strong,
+  .staff-bar {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* The staff page is compact: the seating section (the scheme and the
+     table of sixteen seats) fits one A4 sheet with the header. A row of the
+     table never breaks across two sheets. */
+  .menu--staff body {
+    font-size: var(--text-base);
+  }
+
+  .menu--staff .cover--staff {
+    padding-block: var(--space-sm);
+  }
+
+  .menu--staff .section {
+    margin-block: var(--space-md);
+  }
+
+  .menu--staff .seating__card {
+    row-gap: var(--space-sm);
+  }
+
+  .seat-table {
+    font-size: var(--text-sm);
+    line-height: var(--line-height-tight);
+  }
+
+  .seat-table td {
+    padding-block: calc(var(--space-3xs) / 2);
+  }
+
+  .seat-number {
+    padding-block: 0;
+  }
+
+  .seat-table tr {
+    break-inside: avoid;
   }
 }

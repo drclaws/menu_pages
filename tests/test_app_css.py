@@ -15,6 +15,7 @@ SECTIONS = (
     ("3", "Base"),
     ("4", "Layout primitives"),
     ("5", "Components"),
+    ("5a", "Page"),
     ("6", "Scheme"),
     ("7", "Motion & reveal"),
     ("8", "Print"),
@@ -174,6 +175,77 @@ class SetSwitcherStylesTest(unittest.TestCase):
         self.assertIn("var(--sets-tab-min)", self.components)
         self.assertNotIn("--events-tab-min", self.components)
         self.assertNotIn("--events-count", self.code)
+
+
+class MenuStylesTest(unittest.TestCase):
+    """The components of the menu (section 5), the page (5a) and its print (8)."""
+
+    @classmethod
+    def setUpClass(cls):
+        raw = APP_CSS.read_text(encoding="utf-8")
+        sections = section_texts(raw)
+        cls.components = rules(strip_comments(sections["5"][1]))
+        cls.page_code = strip_comments(sections["5a"][1])
+        cls.page = rules(cls.page_code)
+        cls.print = rules(media_blocks(strip_comments(sections["8"][1]), "print")[0])
+
+    def test_the_components_are_in_section_5(self):
+        for selector in (".note-line", ".pills", ".pill", ".pill--flag", ".pill--plain",
+                         ".legend", ".legend__mark", ".seat-table", ".seat-number",
+                         ".seat-number--couple", ".seating__meta", ".text-widget--card",
+                         ".text-widget--signature", ".dishes", ".dish", ".drink",
+                         ".schedule--ruled .schedule__item", ".staff-bar", ".staff-footer",
+                         ".sets__head", ".sets__pairing, .sets__swaps", ".sets__note"):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.components)
+
+    def test_the_page_is_in_section_5a(self):
+        for selector in (".cover", ".cover--staff", ".cover__counters", ".menu--staff body"):
+            with self.subTest(selector=selector):
+                self.assertIn(selector, self.page)
+        # the page depends on the audience alone, never on the width
+        self.assertNotRegex(self.page_code, r"@media|@container")
+
+    def test_the_flags_use_the_menu_tokens(self):
+        self.assertEqual(self.components[".pill--flag"],
+                         "border-color: var(--color-flag-line); "
+                         "background-color: var(--color-flag-bg); "
+                         "color: var(--color-flag-text); "
+                         "font-weight: var(--font-weight-heading);")
+        mark = self.components[".legend__mark"]
+        self.assertIn("background-color: var(--color-flag);", mark)
+        self.assertIn("color: var(--color-on-flag);", mark)
+        self.assertIn("border-radius: var(--radius-round);", mark)
+
+    def test_an_empty_row_of_pills_takes_no_room(self):
+        self.assertEqual(self.components[".pills:empty"], "display: none;")
+
+    def test_the_courses_are_numbered_by_a_counter_of_the_list(self):
+        self.assertIn("counter-reset: course;", self.components[".sets__courses"])
+        self.assertIn("counter-increment: course;", self.components[".sets__courses > .dish"])
+        self.assertIn("content: counter(course);", self.components[".sets__courses > .dish::before"])
+
+    def test_the_audience_sets_the_alignment_and_the_type_size(self):
+        self.assertEqual(self.page[".menu--guest .cover, .menu--guest .section"],
+                         "text-align: center;")
+        self.assertEqual(self.page[".menu--guest .card, .menu--guest .text-widget--card"],
+                         "text-align: start;")
+        # one step of the body text larger: 17px at a 16px root
+        self.assertEqual(self.page[".menu--staff body"],
+                         "font-size: calc(var(--text-base) * var(--text-base-desktop) "
+                         "/ var(--text-base-mobile));")
+
+    def test_print_keeps_the_background_colours_of_flags_and_labels(self):
+        self.assertEqual(self.print[".legend__mark, .pill, .time-label--strong, .staff-bar"],
+                         "-webkit-print-color-adjust: exact; print-color-adjust: exact;")
+
+    def test_print_of_the_staff_page_is_compact(self):
+        self.assertEqual(self.print[".menu--staff .section"], "margin-block: var(--space-md);")
+        self.assertEqual(self.print[".seat-table td"],
+                         "padding-block: calc(var(--space-3xs) / 2);")
+        self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
+        self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
+        self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
 
 
 if __name__ == "__main__":

@@ -47,16 +47,14 @@ LICENSE                the MIT license
 
 | Command | What it does |
 |---|---|
-| `python3 build.py build [--data DIR] [--out DIR] [--base-path PATH] [--allow-path PATH]...` | checks the data, writes `<token>/index.html` for every guest record and for the staff record and `assets/` into `--out` (default: `dist`), which is replaced only when every check of the output has passed |
+| `python3 build.py build [--data DIR] [--out DIR] [--base-path PATH]` | checks the data, writes `<token>/index.html` for every guest record and for the staff record and `assets/` into `--out` (default: `dist`), which is replaced only when every check of the output has passed |
 | `python3 build.py validate [--data DIR]` | checks the data and prints a summary; writes nothing |
 | `python3 build.py links --url URL [--data DIR]` | prints the name of every guest record and the address of its page, `URL/<token>/`, the staff page last; the lines hold personal data, so the command is for local use only and refuses to run in CI |
 | `python3 build.py token [--prefix NAME]` | prints a new token: fully random (for the staff record) or readable, `NAME-xxxx` |
 
 `--data` is a directory with `menu.json` and `guests.json` (default:
 `examples/data` next to `build.py`). `--base-path` is the path from the root of
-the site under which the output is published (default: `/`); `--allow-path`
-is a directory of the site that the build does not write, e.g. the
-invitations, which the links of the pages may lead to (it may be repeated).
+the site under which the output is published (default: `/`).
 
 Exit codes: `0` - success; `1` - errors in the data or in the finished output,
 an `--out` that is not replaced, `links` in CI, or the submodule `site/` is not

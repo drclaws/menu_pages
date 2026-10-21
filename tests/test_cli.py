@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import build  # noqa: E402  (imported after sys.path is prepared)
+from tests import fixtures  # noqa: E402
 
 SCRIPT = ROOT / "build.py"
 
@@ -26,6 +27,21 @@ COMMANDS = ("build", "validate")
 
 #: The width argparse wraps its messages to, the same in and out of process.
 COLUMNS = "80"
+
+#: What `validate` prints for each fixture.
+SUMMARIES = {
+    "mockup16": "validate: OK - 16 seat(s), 10 guest record(s) + staff, 9 dish(es), 2 set(s), 4 drink(s)\n",
+    "reserved19": "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n",
+    "plain": "validate: OK - 4 seat(s), 3 guest record(s) + staff, 6 dish(es), 3 set(s), 2 drink(s)\n",
+}
+WARNINGS = {
+    "mockup16": (
+        "warning: menu.json: field 'table.seats' has 2 free seat(s): 12, 13 (shown as free on the staff page; "
+        "list a seat that stays free on purpose in 'reservedSeats')\n"
+    ),
+    "reserved19": "",
+    "plain": "",
+}
 
 
 def run_main(*args: str) -> SimpleNamespace:
@@ -79,14 +95,25 @@ class CliTest(unittest.TestCase):
         self.assertIn("usage:", result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_commands_are_not_implemented_yet(self):
-        for command in COMMANDS:
-            with self.subTest(command=command):
-                result = run_main(command)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("is not implemented yet", result.stderr)
-                self.assertEqual(result.stderr, f"error: '{command}' is not implemented yet\n")
-                self.assertEqual(result.stdout, "")
+    def test_build_is_not_implemented_yet(self):
+        result = run_main("build")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, "error: 'build' is not implemented yet\n")
+        self.assertEqual(result.stdout, "")
+
+    def test_build_takes_no_parameters_yet(self):
+        result = run_main("build", "--out", "dist")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
+        self.assertNotIn("is not implemented yet", result.stderr)
+
+    def test_validate_takes_the_data_directory_only(self):
+        result = run_main("validate", "--out", "dist")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
+        result = run_main("validate", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--data DIR", result.stdout)
 
     def test_unknown_command_exits_with_two(self):
         result = run_main("deploy")
@@ -94,14 +121,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("invalid choice", result.stderr)
         self.assertNotIn("is not implemented yet", result.stderr)
         self.assertEqual(result.stdout, "")
-
-    def test_commands_take_no_parameters_yet(self):
-        for command in COMMANDS:
-            with self.subTest(command=command):
-                result = run_main(command, "--out", "dist")
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("unrecognized arguments", result.stderr)
-                self.assertNotIn("is not implemented yet", result.stderr)
 
     def test_import_has_no_output(self):
         with tempfile.TemporaryDirectory(prefix="menu-build-test-") as temporary:
@@ -119,9 +138,12 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
 
     def test_script_from_another_directory_behaves_the_same(self):
-        cases = (("--help",), (), *((command,) for command in COMMANDS), ("deploy",))
         with tempfile.TemporaryDirectory(prefix="menu-build-test-") as temporary:
-            work = Path(temporary).resolve()
+            base = Path(temporary).resolve()
+            data = fixtures.write_data(base / "data", *fixtures.reserved19())
+            work = base / "work"
+            work.mkdir()
+            cases = (("--help",), (), ("build",), ("validate", "--data", str(data)), ("deploy",))
             for args in cases:
                 with self.subTest(args=args):
                     expected = run_main(*args)
@@ -129,8 +151,155 @@ class CliTest(unittest.TestCase):
                     self.assertEqual(result.returncode, expected.returncode)
                     self.assertEqual(result.stdout, expected.stdout)
                     self.assertEqual(result.stderr, expected.stderr)
-            # nothing is written to the current directory
+            # nothing is written to the current directory, nor next to the data
             self.assertEqual(list(work.iterdir()), [])
+            self.assertEqual(sorted(path.name for path in data.iterdir()), ["guests.json", "menu.json"])
+
+
+class ValidateTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="menu-validate-test-")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+
+    def validate(self, menu, guests, name: str = "data") -> SimpleNamespace:
+        data = fixtures.write_data(self.base / name, menu, guests)
+        return run_main("validate", "--data", str(data))
+
+    def assert_no_values(self, text: str, menu, guests) -> None:
+        for secret in fixtures.tokens(guests) | fixtures.names(guests, menu):
+            self.assertNotIn(secret, text)
+
+    def test_each_fixture_passes(self):
+        for name, make in fixtures.SETS.items():
+            with self.subTest(fixture=name):
+                result = self.validate(*make(), name=name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, SUMMARIES[name])
+                self.assertEqual(result.stderr, WARNINGS[name])
+
+    def test_broken_data_fails_with_messages_without_values(self):
+        menu, guests = fixtures.reserved19()
+        guests[3]["seats"][0]["number"] = 4
+        menu["dishes"]["hummus"]["ingredient"] = "Chickpeas"
+        result = self.validate(menu, guests)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(
+            result.stderr,
+            "error: menu.json: unknown field 'dishes.hummus.ingredient' (did you mean 'ingredients'?)\n"
+            "error: guests.json: guest #4: field 'seats[0].number' refers to the seat 4, already taken by guest #3\n"
+            "validate: failed with 2 error(s)\n",
+        )
+        self.assert_no_values(result.stderr, menu, guests)
+
+    def test_warnings_come_first_and_do_not_fail(self):
+        menu, guests = fixtures.reserved19()
+        del guests[12]
+        result = self.validate(menu, guests)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stdout,
+            "validate: OK - 19 seat(s), 12 guest record(s), 8 dish(es), 2 set(s), 5 drink(s)\n",
+        )
+        self.assertEqual(
+            result.stderr.splitlines(),
+            [
+                "warning: guests.json: has no staff record ('staff': true): no staff page is built",
+                "warning: menu.json: field 'sections' has parts for the staff only (sections[2].widgets[1], "
+                "sections[4].widgets[1]), but there is no staff record",
+            ],
+        )
+
+    def test_a_plan_without_room_for_a_label_fails(self):
+        menu, guests = fixtures.plain()
+        menu["table"] = {
+            "label": "Two narrow arms",
+            "arms": [
+                {"id": "west", "x": 48, "y": 37, "width": 20, "height": 233},
+                {"id": "east", "x": 172, "y": 37, "width": 20, "height": 233},
+            ],
+            "seats": [
+                {"arm": "west", "side": "right", "count": 3},
+                {"arm": "west", "side": "left", "count": 3},
+                {"arm": "east", "side": "left", "count": 3},
+            ],
+        }
+        guests[:3] = [{"token": "lynx-5qd8", "name": "Lev", "seats": [{"number": 5}, {"number": 2, "plusOne": True}]}]
+        result = self.validate(menu, guests)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            result.stderr.splitlines()[-2:],
+            ["error: guests.json: guest #1: seat 2: no room for the '+1' label", "validate: failed with 1 error(s)"],
+        )
+
+    def test_a_missing_directory_or_file(self):
+        missing = self.base / "nowhere"
+        result = run_main("validate", "--data", str(missing))
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(result.stderr.startswith("error: data directory not found: "), result.stderr)
+        data = fixtures.write_data(self.base / "data", *fixtures.plain())
+        (data / "guests.json").unlink()
+        result = run_main("validate", "--data", str(data))
+        self.assertEqual(result.returncode, 1)
+        lines = result.stderr.splitlines()
+        self.assertTrue(lines[0].startswith("error: ") and lines[0].endswith("guests.json: file not found"), lines)
+        self.assertEqual(lines[1:], ["validate: failed with 1 error(s)"])
+
+    def test_the_default_data_directory_is_next_to_the_script(self):
+        result = run_main("validate")
+        self.assertEqual(result.returncode, 1)
+        expected = str(Path("examples") / "data")
+        self.assertTrue(result.stderr.startswith("error: data directory not found: "), result.stderr)
+        self.assertIn(expected, result.stderr)
+
+    def test_a_token_in_a_path_is_hidden(self):
+        # the data lies in a directory named after a token, and a message names
+        # a file in it: the token is masked
+        menu, guests = fixtures.reserved19()
+        token = guests[0]["token"]
+        data = fixtures.write_data(self.base / token, menu, guests)
+        (data / "menu.json").write_text('{"schemaVersion": 1,', encoding="utf-8")
+        result = run_main("validate", "--data", str(data))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("menu.json: invalid JSON", result.stderr)
+        self.assertNotIn(token, result.stderr)
+        self.assertIn("…", result.stderr)
+
+    def test_a_key_repeated_in_guests_json_is_not_named(self):
+        menu, guests = fixtures.reserved19()
+        data = fixtures.write_data(self.base / "data", menu, guests)
+        text = (data / "guests.json").read_text(encoding="utf-8")
+        text = text.replace('"name": "Boris",', '"name": "Boris", "Boris": 1, "Boris": 2,', 1)
+        (data / "guests.json").write_text(text, encoding="utf-8")
+        result = run_main("validate", "--data", str(data))
+        self.assertEqual(result.returncode, 1)
+        lines = result.stderr.splitlines()
+        self.assertTrue(
+            lines[0].endswith("guests.json: duplicate key <unknown key> in '[2]' (JSON keeps only the last one; merge or rename them)"),
+            lines,
+        )
+        self.assert_no_values(result.stderr, menu, guests)
+
+    def test_an_internal_error_quotes_no_data(self):
+        menu, guests = fixtures.reserved19()
+        data = fixtures.write_data(self.base / "data", menu, guests)
+        with mock.patch.object(build, "summary", side_effect=KeyError("Olga")), mock.patch.dict(os.environ, {"BUILD_DEBUG": ""}):
+            result = run_main("validate", "--data", str(data))
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, r"^error: internal error: KeyError at \S+:\d+ \(set BUILD_DEBUG=1 for the traceback\)\n")
+        self.assertTrue(result.stderr.endswith("validate: failed\n"))
+        self.assertNotIn("Olga", result.stderr)
+
+    def test_load_data_returns_the_checked_data_and_the_trees(self):
+        from menu_tools import _core
+
+        data = fixtures.write_data(self.base / "data", *fixtures.reserved19())
+        loaded = build.load_data(data, _core.Report())
+        self.assertEqual(loaded.index.total, 19)
+        self.assertEqual(len(loaded.trees.guests), 12)
+        self.assertEqual(loaded.trees.staff.number, 13)
+        self.assertEqual(loaded.menu, fixtures.reserved19()[0])
 
 
 if __name__ == "__main__":

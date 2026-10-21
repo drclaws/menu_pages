@@ -296,6 +296,10 @@ class MenuStylesTest(unittest.TestCase):
         self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
         self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
 
+    def test_print_keeps_the_head_of_a_section_with_what_follows(self):
+        # both: with `break-after` alone a browser splits the eyebrow from the title
+        self.assertEqual(self.print[".section__head"], "break-inside: avoid; break-after: avoid;")
+
 
 def declarations(body: str) -> dict[str, str]:
     """{property: value} of a rule body as `rules()` gives it."""

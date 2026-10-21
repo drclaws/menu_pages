@@ -264,9 +264,17 @@ class WithoutTheSubmoduleTest(unittest.TestCase):
 
     def test_an_empty_submodule_directory_gives_the_same_message(self):
         (self.root / "site").mkdir()
-        for command in ("build", "validate"):
+        commands = (
+            ("build",),
+            ("build", "--base-path", "/menu", "--allow-path", "/invite"),
+            ("validate",),
+            ("links", "--url", "https://example.org/menu"),
+            ("token",),
+            ("token", "--prefix", "heron"),
+        )
+        for command in commands:
             with self.subTest(command=command):
-                result = run_python(str(self.root / "build.py"), command, cwd=self.work)
+                result = run_python(str(self.root / "build.py"), *command, cwd=self.work)
                 self.assert_missing_message(result)
 
     def test_help_still_works(self):

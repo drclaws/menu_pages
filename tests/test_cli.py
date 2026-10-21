@@ -23,7 +23,7 @@ SCRIPT = ROOT / "build.py"
 if Path(build.__file__).resolve() != SCRIPT:  # pragma: no cover
     raise RuntimeError(f"unexpected build module: {build.__file__}")
 
-COMMANDS = ("build", "validate")
+COMMANDS = ("build", "validate", "links", "token")
 
 #: The width argparse wraps its messages to, the same in and out of process.
 COLUMNS = "80"
@@ -154,6 +154,8 @@ class CliTest(unittest.TestCase):
                 ("build", "--data", str(base / "nowhere"), "--out", str(out)),
                 ("build", "--data", str(data), "--out", str(out), "--allow-path", allowed),
                 ("validate", "--data", str(data)),
+                ("token", "--prefix", "a b"),
+                ("links", "--url", "ftp://example.org/menu", "--data", str(data)),
                 ("deploy",),
             )
             for args in cases:
@@ -167,6 +169,58 @@ class CliTest(unittest.TestCase):
             self.assertEqual(list(work.iterdir()), [])
             self.assertEqual(sorted(path.name for path in data.iterdir()), ["guests.json", "menu.json"])
             self.assertEqual(sorted(path.name for path in base.iterdir()), ["data", "out", "work"])
+
+
+class TokenTest(unittest.TestCase):
+    def check(self, token: str) -> None:
+        from menu_tools import _core
+
+        self.assertIsNone(_core.check_token(token))
+        self.assertNotIn(token.lower(), _core.RESERVED_TOKENS)
+
+    def test_a_random_token(self):
+        tokens = set()
+        for _ in range(3):
+            result = run_main("token")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertRegex(result.stdout, r"\A[A-Za-z0-9_-]{16,}\n\Z")
+            self.check(result.stdout.strip())
+            tokens.add(result.stdout)
+        self.assertEqual(len(tokens), 3)
+
+    def test_a_readable_token(self):
+        for prefix in ("heron", "Crane_2", "a"):
+            with self.subTest(prefix=prefix):
+                result = run_main("token", "--prefix", prefix)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertRegex(result.stdout, rf"\A{prefix}-[a-z0-9]{{4}}\n\Z")
+                self.check(result.stdout.strip())
+
+    def test_a_bad_prefix_is_a_usage_error_that_does_not_repeat_it(self):
+        for prefix in ("a b", "", "Rosalind's", "Leopold" * 30, "judy/x"):
+            with self.subTest(prefix=prefix):
+                result = run_main("token", "--prefix", prefix)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("build.py token: error: argument --prefix: the prefix", result.stderr)
+                if prefix:
+                    self.assertNotIn(prefix, result.stderr)
+                for word in ("Rosalind", "Leopold", "judy"):
+                    self.assertNotIn(word, result.stderr)
+
+    def test_token_reads_no_data(self):
+        result = run_main("token", "--data", "data")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_as_a_script(self):
+        with tempfile.TemporaryDirectory(prefix="menu-build-test-") as temporary:
+            result = run_script("token", "--prefix", "heron", cwd=Path(temporary))
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"\Aheron-[a-z0-9]{4}\n\Z")
 
 
 class BuildArgumentsTest(unittest.TestCase):

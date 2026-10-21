@@ -3,6 +3,8 @@
 
     python build.py build    [--data DIR] [--out DIR] [--base-path PATH] [--allow-path PATH]...
     python build.py validate [--data DIR]
+    python build.py links    --url URL [--data DIR]
+    python build.py token    [--prefix NAME]
 
 The builder writes a page per guest and a staff page for the restaurant, each
 at a secret address `<base path>/<token>/`.  Only the Python 3 standard library
@@ -25,6 +27,12 @@ output starts with it.  A link (`<a href>`, `<area href>`) to a directory of
 the site that the build does not write is allowed by `--allow-path` and is not
 looked up.  Two builds of the same data are identical byte for byte.
 
+`links` checks the data as `validate` does and prints the address of every
+page, `URL/<token>/` after the name of its guest record and a tab, the staff
+page last after `staff`; it prints personal data, so it is meant for local
+use only and refuses to run in CI.  `token` prints a new token: fully random
+(as the staff record needs it) or `NAME-xxxx`, readable with a random tail.
+
 Warnings and errors go to stderr; they never quote the data, and a token that
 is part of a path in a message is hidden.  A message about a record names it
 `guests.json: guest #N`, N being its position in `guests.json` (the staff
@@ -32,10 +40,10 @@ record counts too).
 
 Importing this module has no side effects: everything happens inside `main()`.
 
-Exit codes: 0 - success (`--help`, valid data, a finished build), 1 - errors
-in the data or in the finished output, an output directory that is not
-replaced, or the invitations builder is missing in `site/` (the submodule is
-not checked out), 2 - bad command line.
+Exit codes: 0 - success (`--help`, valid data, a finished build, the links,
+a token), 1 - errors in the data or in the finished output, an output
+directory that is not replaced, `links` in CI, or the invitations builder is
+missing in `site/` (the submodule is not checked out), 2 - bad command line.
 """
 
 import argparse
@@ -70,6 +78,8 @@ SITE_DIR = "site"
 COMMANDS = {
     "build": "build the pages of the guests and the staff page",
     "validate": "check the data without writing anything",
+    "links": "print the address of every page (personal data: for local use only)",
+    "token": "print a new token for a record",
 }
 
 
@@ -90,6 +100,21 @@ def _allow_path_type(value: str) -> str:
     from menu_tools import _core
 
     return _core.allow_path_argument(value)
+
+
+def _url_type(value: str) -> str:
+    """`links --url`: an http(s) address without credentials, query or
+    fragment; the trailing '/' is dropped (the rule of the invitations)."""
+    from menu_tools import _core
+
+    return _core.parse_published_url(value)
+
+
+def _prefix_type(value: str) -> str:
+    """`token --prefix`: the characters of a token (the rule of the invitations)."""
+    from menu_tools import _core
+
+    return _core.token_prefix(value)
 
 
 def _check_build_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -150,6 +175,32 @@ def make_parser() -> argparse.ArgumentParser:
 
     validate = commands.add_parser("validate", help=COMMANDS["validate"], description=COMMANDS["validate"])
     add_data_option(validate)
+
+    links = commands.add_parser(
+        "links",
+        help=COMMANDS["links"],
+        description="Print the address of every page for sending by hand: the name of each guest "
+        "record, a tab and URL/<token>/, the staff page last. The lines hold personal data and the "
+        "secret addresses: the command is for local use only and refuses to run in CI.",
+    )
+    links.add_argument(
+        "--url",
+        metavar="URL",
+        required=True,
+        type=_url_type,
+        help="address where the output directory of the build is published, e.g. "
+        "https://example.org/menu; the links are URL/<token>/",
+    )
+    add_data_option(links)
+
+    token = commands.add_parser("token", help=COMMANDS["token"], description=COMMANDS["token"])
+    token.add_argument(
+        "--prefix",
+        metavar="NAME",
+        type=_prefix_type,
+        help="print a readable token NAME-xxxx with a short random tail (NAME: A-Z, a-z, 0-9, '_' "
+        "and '-'); without it the token is fully random, as the staff record needs it",
+    )
     return parser
 
 
@@ -415,6 +466,47 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
 
 
 # --------------------------------------------------------------------------
+# links and token
+# --------------------------------------------------------------------------
+
+
+def page_links(url: str, data: Data) -> list[str]:
+    """`<name><TAB><url>/<token>/` for every guest record in the order of
+    `guests.json` (the white space of the name collapsed), then
+    `staff<TAB><url>/<token>/` for the staff record, if any."""
+    lines = [
+        f"{' '.join(data.guests[page.number - 1]['name'].split())}\t{url}/{page.token}/"
+        for page in data.trees.guests
+    ]
+    if data.trees.staff is not None:
+        lines.append(f"staff\t{url}/{data.trees.staff.token}/")
+    return lines
+
+
+def cmd_links(args: argparse.Namespace, report: Any) -> int:
+    from menu_tools import _core
+
+    if _core.running_in_ci():
+        raise _core.BuildError(
+            "this command prints personal data and is meant for local use only; it does not "
+            f"run in CI ({' or '.join(_core.CI_ENVIRONMENT_VARIABLES)} is set)"
+        )
+    data = load_data(_data_dir(args), report)
+    # nothing is printed unless the whole data set is valid
+    for line in page_links(args.url, data):
+        _stdout(line)
+    return EXIT_OK
+
+
+def cmd_token(args: argparse.Namespace, report: Any) -> int:
+    from menu_tools import _core
+
+    prefix = args.prefix
+    _stdout(_core.generate_token() if prefix is None else _core.generate_prefixed_token(prefix))
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------
 # Running a command
 # --------------------------------------------------------------------------
 
@@ -422,6 +514,8 @@ def cmd_build(args: argparse.Namespace, report: Any) -> int:
 COMMAND_FUNCTIONS = {
     "build": cmd_build,
     "validate": cmd_validate,
+    "links": cmd_links,
+    "token": cmd_token,
 }
 
 

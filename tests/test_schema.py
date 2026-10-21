@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from menu_tools import _core, _schema  # noqa: E402  (imported after sys.path is prepared)
+from menu_tools import _core, _page, _schema  # noqa: E402  (imported after sys.path is prepared)
 from tests import fixtures  # noqa: E402
 
 M = "menu.json: "
@@ -30,6 +30,17 @@ def check(menu, guests) -> tuple[_schema.MenuIndex, list[str], list[str]]:
     report = _core.Report()
     index = _schema.check_data(menu, guests, report)
     return index, report.errors, report.warnings
+
+
+def full_check(menu, guests) -> tuple[list[str], list[str]]:
+    """The messages of the checks and, when there is no error, of what the
+    page trees show."""
+    report = _core.Report()
+    index = _schema.check_data(menu, guests, report)
+    if not report.errors:
+        trees = _page.build_trees(menu, guests, report)
+        _schema.check_usage(index, menu, trees.usage, report)
+    return report.errors, report.warnings
 
 
 def secrets_of(menu, guests) -> set[str]:
@@ -307,6 +318,39 @@ def _(menu, guests):
     menu["sections"][4]["widgets"][0]["staff"] = {"note": "The bar mixes cocktails."}
 
 
+@case("dish_for_the_staff_without_a_staff_widget", warnings=[M + "field 'dishes.melon' is not shown on any page"])
+def _(menu, guests):
+    del menu["sections"][2]["widgets"][1]
+
+
+@case(
+    "dish_without_allergens",
+    warnings=[
+        M + "field 'dishes.bruschetta.staff.allergens' is not set: the staff page shows no allergen information "
+        "for the dish (write [] for none)"
+    ],
+)
+def _(menu, guests):
+    del menu["dishes"]["bruschetta"]["staff"]["allergens"]
+
+
+@case(
+    "missing_swap",
+    warnings=[
+        M + "field 'dishes.cheese-board.staff.swaps' has no swap for 'nuts', while the dish holds an allergen it "
+        "avoids and 1 seat(s) need it"
+    ],
+)
+def _(menu, guests):
+    del menu["dishes"]["cheese-board"]["staff"]["swaps"]["nuts"]
+
+
+@case("set_in_no_widget", warnings=[M + "field 'sets.meat' is not shown on any page"])
+def _(menu, guests):
+    menu["sections"][3]["widgets"][0]["items"] = ["fish"]
+    menu["sets"]["fish"]["courses"] += ["carpaccio", "duck"]
+
+
 # --------------------------------------------------------------------------
 # guests.json
 # --------------------------------------------------------------------------
@@ -559,7 +603,7 @@ class BrokenDataTest(unittest.TestCase):
     def run_case(self, item: Case) -> None:
         menu, guests = fixtures.SETS[item.base]()
         item.change(menu, guests)
-        _index, errors, warnings = check(menu, guests)
+        errors, warnings = full_check(menu, guests)
         self.assertEqual((errors, warnings), (item.errors, item.warnings))
         secrets = secrets_of(menu, guests) | secrets_of(*fixtures.SETS[item.base]())
         for message in errors + warnings:

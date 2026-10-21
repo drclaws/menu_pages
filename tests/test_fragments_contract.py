@@ -43,7 +43,8 @@ ALLOW_PATHS = ("/i",)
 PARTIALS = ("dish-item", "legend", "pills", "scheme", "seat-table", "section-head",
             "section-note", "sections")
 
-SCHEME_REASON = "the scheme partial prints no markup, so no field of the scheme is read"
+#: The kinds of node of the plan of the table.
+SCHEME_KINDS = ("scheme", "schemeCouple", "schemeSeat", "schemeBadge", "schemeLabel")
 
 #: The fields of the contract that no fragment reads, with the reason.
 UNREAD = {
@@ -53,9 +54,6 @@ UNREAD = {
     "seating.mySeats": "the page shows the own seats by seatLabel and on the scheme",
     "mySeat.number": "a field of mySeats",
     "mySeat.mark": "a field of mySeats",
-    **{f"{kind}.{field}": SCHEME_REASON
-       for kind in ("scheme", "schemeCouple", "schemeSeat", "schemeBadge", "schemeLabel")
-       for field in T.NODES[kind]},
 }
 
 #: The fields that only the staff page fills: a guest's page has them empty
@@ -66,6 +64,7 @@ STAFF_ONLY = frozenset({
     "seating.legend", "seating.rows", "seating.footnote",
     *(f"legend.{field}" for field in T.NODES["legend"]),
     *(f"row.{field}" for field in T.NODES["row"]),
+    "scheme.badges", *(f"schemeBadge.{field}" for field in T.NODES["schemeBadge"]),
     "dish.allergens", "dish.tags", "dish.noRestrictions", "dish.swapLines", "dish.note",
     "set.swapLines", "drinks.list",
 })
@@ -74,6 +73,8 @@ STAFF_ONLY = frozenset({
 GUEST_ONLY = frozenset({
     "seating.mySeats", *(f"mySeat.{field}" for field in T.NODES["mySeat"]),
     "seating.seatLabel", "seating.whoLabel",
+    "scheme.labels", "scheme.mine", "scheme.single",
+    *(f"schemeLabel.{field}" for field in T.NODES["schemeLabel"]),
     "drinks.groups", *(f"group.{field}" for field in T.NODES["group"]),
     *(f"link.{field}" for field in T.NODES["widget:link"] if field not in T.WIDGET_COMMON_FIELDS),
 })
@@ -81,10 +82,16 @@ GUEST_ONLY = frozenset({
 #: The words of the interface: they live in the fragments, never in the tree.
 STAFF_WORDS = ("Staff version · not for guests", "updated", "No.", "Guest · dietary notes",
                "’s guest", "[name]", "no restrictions", "Contact on the night:")
+#: The words of the plan of the table: its name and the labels of the guest's seats.
+SCHEME_WORDS = ("Table plan", "seats", "Your seat", "Your seats", "You", "+1")
 #: The classes of the parts that the staff page alone has.
 STAFF_CLASSES = ("staff-bar", "staff-footer", "cover--staff", "cover__counters", "legend",
                  "seat-table", "seat-number", "pills", "pill", "dish__line", "sets__swaps",
-                 "drinks__staff", "seating__footnote", "seating__divider")
+                 "drinks__staff", "seating__footnote", "seating__divider", "seat-badge",
+                 "seat--flagged")
+#: The classes of the plan that the staff page never has: the guest's own
+#: seats, their rings and labels.
+GUEST_CLASSES = ("seat--you", "seat__ring", "seat-label")
 
 
 def field_name(kind: str, field: str) -> str:
@@ -256,16 +263,13 @@ class TreeTests(unittest.TestCase):
                 seen.add(kind)
                 with self.subTest(tree=name, node=kind):
                     self.assertEqual(list(value), list(T.NODES[kind]))
-        # every kind of node is in a tree, except the scheme: it is null in all
-        scheme_kinds = {"scheme", "schemeCouple", "schemeSeat", "schemeBadge", "schemeLabel"}
-        self.assertEqual(seen, set(T.NODES) - scheme_kinds)
-        # the guest's scheme has the labels, the staff scheme the badges
-        kinds = set()
-        for staff_page in (False, True):
-            for kind, value in T.nodes(T.scheme_example(staff_page), "scheme"):
-                kinds.add(kind)
-                self.assertEqual(list(value), list(T.NODES[kind]))
-        self.assertEqual(kinds, scheme_kinds)
+        # every kind of node is in a tree, the plan of the table too
+        self.assertEqual(seen, set(T.NODES))
+        # the guest's plan has the labels, the staff plan the badges
+        for name, kinds in (("guest-plus-one", {"schemeLabel"}), ("staff", {"schemeBadge"})):
+            with self.subTest(tree=name):
+                found = {kind for kind, _value in T.nodes(T.all_trees()[name])}
+                self.assertEqual(found & {"schemeLabel", "schemeBadge"}, kinds)
 
     def test_a_node_outside_the_contract_is_refused(self):
         with self.assertRaises(ValueError):
@@ -281,12 +285,34 @@ class TreeTests(unittest.TestCase):
         marks = {seat["mark"] for tree in trees.values() for widget in widgets_of(tree, "seating")
                  for seat in widget["mySeats"]}
         self.assertEqual(marks, set(T.MY_SEAT_MARKS))
-        self.assertIsNone(plus_one["scheme"])
+        # the plan of the guest: the couple label and seats, both labels
+        plan = plus_one["scheme"]
+        self.assertEqual(plan["couple"]["text"], T.COUPLE_LABEL)
+        self.assertEqual([seat["number"] for seat in plan["seats"] if seat["kind"] == "couple"],
+                         ["4", "5"])
+        self.assertEqual([(seat["number"], seat["ring"]) for seat in plan["seats"]
+                          if seat["kind"] == "you"], [("8", True), ("9", True)])
+        self.assertEqual([(label["isYou"], label["isPlusOne"]) for label in plan["labels"]],
+                         [(True, False), (False, True)])
+        self.assertEqual((plan["mine"], plan["single"], plan["badges"]), ("8 and 9", False, []))
         alone = widgets_of(trees["guest-without-table"], "seating")[0]
         self.assertEqual((alone["seatLabel"], alone["scheme"]), ("Seat 1", None))
+        # a menu with a table whose widget shows no plan
         pair = widgets_of(trees["guest-pair"], "seating")[0]
+        self.assertIsNone(pair["scheme"])
         self.assertEqual(pair["whoLabel"], "Peggy and Victor")
         self.assertEqual(len(widgets_of(trees["guest-pair"], "sets")[0]["items"]), 1)
+        # the staff plan: the flagged seats, a seat with two badges, no labels
+        staff_plan = widgets_of(trees["staff"], "seating")[0]["scheme"]
+        flagged = [seat["number"] for seat in staff_plan["seats"] if seat["mark"] == "flagged"]
+        self.assertEqual(flagged, ["1", "3", "7", "10", "14"])
+        # a badge sits 12 units off the centre of its seat along x and y
+        per_seat = collections.Counter(
+            seat["number"] for seat in staff_plan["seats"] for badge in staff_plan["badges"]
+            if {abs(int(badge["cx"]) - int(seat["cx"])), abs(int(badge["cy"]) - int(seat["cy"]))}
+            == {12})
+        self.assertEqual(per_seat, {"1": 1, "3": 1, "7": 1, "10": 2, "14": 1})
+        self.assertEqual((staff_plan["hidden"], staff_plan["labels"]), (True, []))
         rows = widgets_of(trees["staff"], "seating")[0]["rows"]
         self.assertEqual(len([row for row in rows if row["isFree"]]), 2)
         self.assertEqual(len([row for row in rows if row["isCouple"]]), 2)
@@ -404,22 +430,36 @@ class FragmentFilesTests(unittest.TestCase):
         markup = "".join(re.sub(r"<!--.*?-->", "", source, flags=re.S)
                          for source in self.sources.values())
         markup += TEMPLATE.read_text(encoding="utf-8")
-        for word in STAFF_WORDS + ("Paired with", "—", "Dinner menu · "):
+        for word in STAFF_WORDS + SCHEME_WORDS + ("Paired with", "—", "Dinner menu · "):
             with self.subTest(word=word):
                 self.assertIn(word, markup)
+        # the words of the plan are in its partial: the tree holds none of them
+        scheme = re.sub(r"<!--.*?-->", "", self.sources["partials/scheme"], flags=re.S)
+        for word in SCHEME_WORDS:
+            with self.subTest(word=word):
+                self.assertIn(word, scheme)
 
-    def test_the_scheme_partial_prints_nothing(self):
-        source = self.sources["partials/scheme"]
-        self.assertEqual(source.count("<!--"), 1)
-        self.assertTrue(source.rstrip().endswith("-->"))
-        for staff_page in (False, True):
-            frame = "<!-- with:scheme --><!-- include:partials/scheme --><!-- endwith -->"
-            template = core.parse_template(frame, "frame", core.load_fragments(FRAGMENTS_DIR))
+    def test_the_scheme_partial_draws_the_plan_from_the_contract(self):
+        frame = "<!-- with:scheme --><!-- include:partials/scheme --><!-- endwith -->"
+        template = core.parse_template(frame, "frame", core.load_fragments(FRAGMENTS_DIR))
+        scheme_fields = {field_name(kind, field) for kind in SCHEME_KINDS
+                         for field in T.NODES[kind]}
+        every = set()
+        for name, other in (("guest-plus-one", STAFF_ONLY), ("staff", GUEST_ONLY)):
+            tree = T.all_trees()[name]
             reads: set[str] = set()
-            scheme = strict(T.scheme_example(staff_page), reads, "scheme")
-            output = core.strip_html_comments(template.render({"scheme": scheme}), "frame")
-            self.assertEqual(output.strip(), "")
-            self.assertEqual(reads, set())
+            scheme = strict(widgets_of(tree, "seating")[0]["scheme"], reads, "scheme")
+            output = core.strip_html_comments(
+                template.render({"isStaff": tree["isStaff"], "scheme": scheme}), "frame")
+            with self.subTest(tree=name):
+                self.assertTrue(output.startswith('\n<svg class="scheme" viewBox="0 0 318 310"'))
+                self.assertTrue(output.endswith("</svg>\n"))
+                self.assertEqual(output.count("<svg"), 1)
+                # it reads the fields of the plan alone, of its own audience
+                self.assertLessEqual(reads, scheme_fields)
+                self.assertEqual(reads & other, set())
+            every |= reads
+        self.assertEqual(every, scheme_fields)
 
 
 # --- the contract ---------------------------------------------------------------
@@ -621,6 +661,15 @@ class PageTests(unittest.TestCase):
                 self.assertNotIn("<table", page)
                 self.assertNotIn("<footer", page)
 
+    def test_the_staff_page_has_no_parts_of_a_guest(self):
+        page = self.pages["staff"]
+        classes = {value for found in re.findall(r'class="([^"]*)"', page)
+                   for value in found.split()}
+        self.assertEqual(classes & set(GUEST_CLASSES), set())
+        self.assertNotIn('role="img"', page)
+        self.assertNotIn("Table plan", page)
+        self.assertNotIn("seating__meta", page)
+
     def test_the_modifiers_are_the_enumerations(self):
         everything = "".join(self.pages.values())
         for variant in T.ENUMS["variant"]:
@@ -724,17 +773,33 @@ class WidgetTests(unittest.TestCase):
                          ["no gluten", "no lactose"])
         self.assertNotIn("pills", rows[5])
         self.assertIn('<p class="note-line seating__footnote">Main course:', section)
-        # no scheme: no rule between a scheme and the table
-        self.assertNotIn("seating__divider", section)
+        # a rule parts the table from the plan above it
+        self.assertEqual(section.count('<hr class="divider seating__divider">'), 1)
 
-    def test_the_seating_widget_with_a_scheme_object(self):
-        for name in ("guest-plus-one", "staff"):
-            tree = T.all_trees()[name]
-            widgets_of(tree, "seating")[0]["scheme"] = T.scheme_example(name == "staff")
-            page = render_strict(tree, self.template)
+    def test_the_plan_stands_first_in_the_card_of_the_seats(self):
+        start = '<div class="card seating__card">\n    \n<svg class="scheme"'
+        guest = element(self.section("guest-plus-one", "seats"), "seating__card")
+        self.assertTrue(guest.startswith(start))
+        self.assertLess(guest.index("</svg>"), guest.index('<p class="seating__meta">'))
+        self.assertIn('role="img" aria-label="Table plan: L-shaped table, 16 seats. Your seats: '
+                      '8 and 9"', guest)
+        staff = element(self.section("staff", "seats"), "seating__card")
+        self.assertTrue(staff.startswith(start))
+        order = [staff.index(marker) for marker in ('aria-hidden="true"', "</svg>",
+                                                   '<hr class="divider seating__divider">',
+                                                   '<table class="seat-table">',
+                                                   "seating__footnote")]
+        self.assertEqual(order, sorted(order))
+        # without a plan: no drawing and no rule above the table
+        for name in ("guest-pair", "guest-without-table"):
             with self.subTest(page=name):
-                self.assertEqual(html_problems(page), [])
-                self.assertEqual("seating__divider" in page, name == "staff")
+                self.assertNotIn("<svg", self.pages[name])
+        tree = T.staff()
+        widgets_of(tree, "seating")[0]["scheme"] = None
+        page = render_strict(tree, self.template)
+        self.assertEqual(html_problems(page), [])
+        self.assertNotIn("<svg", page)
+        self.assertNotIn("seating__divider", page)
 
     def test_the_dishes_of_a_guest(self):
         section = self.section("guest-plus-one", "starters")

@@ -1,15 +1,17 @@
 """Checks of the finished output of the menu builder.
 
 The output is checked by the invitations' `check_output` without a media
-directory: its allow-list then holds exactly the layout of the menu, a
-directory `<token>/` with `index.html` for every page and `assets/` with the
-files of the code.  Links under `allow_paths` (`build --allow-path`) are
-allowed and not looked up; resources there are errors.
+directory: its allow-list then holds the layout of the menu, a directory
+`<token>/` with `index.html` for every page and `assets/` with the files of
+the code.  Links under `allow_paths` (`build --allow-path`) are allowed and
+not looked up; resources there are errors.
 
-On top of that, no element of a page may carry a `style` attribute, inside
-an inline SVG as well: the styles of the pages live in `assets/app.css`
-alone (the invitations' checks look at the URLs of a `style` attribute, not
-at the attribute itself).
+On top of that, `assets/` holds `app.css`, `app.js` and `favicon.svg` and
+nothing else (any other file of the code that would be published, a font or
+a note, is a problem), and no element of a page may carry a `style`
+attribute, inside an inline SVG as well: the styles of the pages live in
+`assets/app.css` alone (the invitations' checks look at the URLs of a
+`style` attribute, not at the attribute itself).
 
 Every problem is reported in one `OutputError`, at most
 `MAX_REPORTED_PROBLEMS` lines as in the invitations.  The messages never
@@ -29,8 +31,11 @@ from menu_tools import _core
 
 #: The directory of the files the pages share, at the top of the output.
 ASSETS_DIR = "assets"
+#: Everything `assets/` of the output holds.
+ASSET_FILES = ("app.css", "app.js", "favicon.svg")
 
 STYLE_PROBLEM = "the attribute 'style' is not allowed (the styles live in assets/app.css)"
+ASSETS_RULE = f"only {', '.join(ASSET_FILES[:-1])} and {ASSET_FILES[-1]} are published in {ASSETS_DIR}/"
 
 #: The last line of a list of problems that was cut short.
 _MORE_RE = re.compile(r"… and (\d+) more problem\(s\) in the output\Z")
@@ -116,6 +121,29 @@ def style_problems(out_dir: Path | str) -> list[str]:
     return [f"{len(places)} files: {STYLE_PROBLEM}; first: {first} line {line}"]
 
 
+def asset_problems(out_dir: Path | str) -> list[str]:
+    """What `assets/` of an output directory holds besides `ASSET_FILES`,
+    a line per entry at its top (a directory with a trailing '/').  The
+    names are shown: they are the names of files of the code."""
+    root = Path(out_dir) / ASSETS_DIR
+    try:
+        with os.scandir(root) as iterator:
+            entries = sorted(iterator, key=lambda entry: entry.name)
+    except FileNotFoundError:
+        return []  # the pages refer to its files: `check_output` reports them missing
+    except OSError as exc:
+        raise _core.BuildError(f"cannot read {ASSETS_DIR}/ of the output: {exc.strerror}") from None
+    problems: list[str] = []
+    for entry in entries:
+        if entry.name in ASSET_FILES and entry.is_file(follow_symlinks=False):
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            problems.append(f"{ASSETS_DIR}/{entry.name}/: unexpected directory ({ASSETS_RULE})")
+        else:
+            problems.append(f"{ASSETS_DIR}/{entry.name}: unexpected file ({ASSETS_RULE})")
+    return problems
+
+
 def _limited(problems: list[str], hidden: int) -> list[str]:
     """At most `MAX_REPORTED_PROBLEMS` lines and a count of the others."""
     limit = _core.MAX_REPORTED_PROBLEMS
@@ -136,10 +164,10 @@ def check_menu_output(
     """Check a finished output directory of the menu; `pages` are the tokens
     of every page (the guests and the staff).
 
-    The invitations' `check_output` with no media directory, then the
-    `style` attributes of the pages; every problem of both together raises
-    one `OutputError`.  A value of `allow_paths` that `check_allow_paths`
-    refuses raises `ValueError` before anything is read.
+    The invitations' `check_output` with no media directory, then the files
+    of `assets/` and the `style` attributes of the pages; every problem
+    together raises one `OutputError`.  A value of `allow_paths` that
+    `check_allow_paths` refuses raises `ValueError` before anything is read.
     """
     problems: list[str] = []
     hidden = 0
@@ -154,10 +182,20 @@ def check_menu_output(
         if more:
             hidden = int(more.group(1))
             problems.pop()
+    problems += asset_problems(out_dir)
     problems += style_problems(out_dir)
     if problems or stats is None:
         raise _core.OutputError(_limited(problems, hidden))
     return stats
 
 
-__all__ = ["STYLE_PROBLEM", "check_menu_output", "shown_path", "style_lines", "style_problems"]
+__all__ = [
+    "ASSET_FILES",
+    "ASSETS_RULE",
+    "STYLE_PROBLEM",
+    "asset_problems",
+    "check_menu_output",
+    "shown_path",
+    "style_lines",
+    "style_problems",
+]

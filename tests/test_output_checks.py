@@ -130,8 +130,27 @@ class OutputChecksTest(support.TempDirTestCase):
                 "assets/extra.json: '.json' files must not be published",
                 "…/notes.html: unexpected file (only index.html is allowed in the directory of a page)",
                 "…/index.html: missing from the output",
+                f"assets/extra.json: unexpected file ({_output.ASSETS_RULE})",
             ],
         )
+
+    def test_assets_hold_the_style_sheet_the_script_and_the_icon_alone(self):
+        self.assertEqual(_output.ASSETS_RULE, "only app.css, app.js and favicon.svg are published in assets/")
+        # files the invitations would publish in assets/: a note, a font, a picture
+        out = self.make_output()
+        (out / "assets" / "notes.txt").write_text("x", encoding="utf-8")
+        (out / "assets" / "fonts").mkdir()
+        (out / "assets" / "fonts" / "body.woff2").write_bytes(b"wOF2")
+        (out / "assets" / "logo.png").write_bytes(b"\x89PNG")
+        self.assertEqual(
+            self.problems(out),
+            [
+                f"assets/fonts/: unexpected directory ({_output.ASSETS_RULE})",
+                f"assets/logo.png: unexpected file ({_output.ASSETS_RULE})",
+                f"assets/notes.txt: unexpected file ({_output.ASSETS_RULE})",
+            ],
+        )
+        self.assertEqual(_output.asset_problems(self.make_output()), [])
 
     def test_a_link_under_an_allowed_path_passes(self):
         for base in ("/", "/menu"):

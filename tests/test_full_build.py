@@ -376,6 +376,20 @@ class FailingBuildTest(BuildTestCase):
         )
         self.assert_kept()
 
+    def test_another_file_in_the_assets_of_the_code_is_not_published(self):
+        code = self.code_with_template("")
+        (code / "assets" / "notes.txt").write_text("a note of the code", encoding="utf-8")
+        with mock.patch.object(build, "CODE_DIR", code):
+            result = self.build(self.data, self.out, menu=self.menu)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            result.stderr,
+            "error: assets/notes.txt: unexpected file (only app.css, app.js and favicon.svg are published in "
+            "assets/)\nbuild: failed with 1 error(s)\n",
+        )
+        self.assert_quiet_about(result, self.menu, self.guests)
+        self.assert_kept()
+
     def test_design_tokens_that_cannot_be_read(self):
         code = self.code_with_template("")
         css = (code / "assets" / "app.css").read_text(encoding="utf-8")

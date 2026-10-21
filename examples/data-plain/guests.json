@@ -1,0 +1,37 @@
+[
+  {
+    "token": "lynx-dcft",
+    "name": "Ezra",
+    "seats": [
+      {
+        "number": 1
+      }
+    ]
+  },
+  {
+    "token": "otter-27y3",
+    "name": "Astrid",
+    "seats": [
+      {
+        "number": 2
+      },
+      {
+        "number": 3,
+        "plusOne": true
+      }
+    ]
+  },
+  {
+    "token": "badger-hrc7",
+    "name": "Sybil",
+    "seats": [
+      {
+        "number": 4
+      }
+    ]
+  },
+  {
+    "token": "U20WeSXseMdn-SK04IFEbA",
+    "staff": true
+  }
+]

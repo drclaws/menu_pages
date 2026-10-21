@@ -359,11 +359,17 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(lines[1:], ["validate: failed with 1 error(s)"])
 
     def test_the_default_data_directory_is_next_to_the_script(self):
-        result = run_main("validate")
-        self.assertEqual(result.returncode, 1)
-        expected = str(Path("examples") / "data")
-        self.assertTrue(result.stderr.startswith("error: data directory not found: "), result.stderr)
-        self.assertIn(expected, result.stderr)
+        # the main example set, whatever the current directory
+        expected = "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n"
+        for cwd in (None, self.base):
+            with self.subTest(cwd=cwd):
+                result = run_main("validate", cwd=cwd)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+                self.assertEqual(result.stderr, "")
+        result = run_script("validate", cwd=self.base)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ""))
+        self.assertEqual(list(self.base.iterdir()), [])
 
     def test_a_token_in_a_path_is_hidden(self):
         # the data lies in a directory named after a token, and a message names

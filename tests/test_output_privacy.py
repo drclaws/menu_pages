@@ -26,8 +26,14 @@ from menu_tools import _core  # noqa: E402
 
 
 def data_sets() -> dict[str, tuple[dict, list]]:
-    """Every data set the pages are built from, by name."""
-    return {f"fixture {name}": make() for name, make in fixtures.SETS.items()}
+    """Every data set the pages are built from, by name: the fixtures and
+    the examples."""
+    sets = {f"fixture {name}": make() for name, make in fixtures.SETS.items()}
+    for directory in sorted((support.ROOT / "examples").iterdir()):
+        sets[f"examples/{directory.name}"] = tuple(
+            json.loads((directory / name).read_text(encoding="utf-8")) for name in ("menu.json", "guests.json")
+        )
+    return sets
 
 
 def record_names(guests: list) -> dict[str, set[int]]:

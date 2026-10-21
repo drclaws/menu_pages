@@ -1,0 +1,166 @@
+[
+  {
+    "token": "egret-xnmg",
+    "name": "Greta",
+    "seats": [
+      {
+        "number": 19
+      },
+      {
+        "number": 1,
+        "plusOne": true,
+        "name": "Hugo"
+      }
+    ]
+  },
+  {
+    "token": "plover-32fe",
+    "name": "Peggy and Walter",
+    "seats": [
+      {
+        "number": 2,
+        "name": "Peggy"
+      },
+      {
+        "number": 3,
+        "name": "Walter",
+        "requirements": [
+          "vegan"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "crane-6bcx",
+    "name": "Rupert",
+    "seats": [
+      {
+        "number": 4,
+        "requirements": [
+          "nuts"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "finch-3gwh",
+    "name": "Frida",
+    "seats": [
+      {
+        "number": 5
+      }
+    ]
+  },
+  {
+    "token": "heron-ksus",
+    "name": "Heidi",
+    "seats": [
+      {
+        "number": 8
+      },
+      {
+        "number": 9,
+        "plusOne": true
+      }
+    ]
+  },
+  {
+    "token": "swift-mdpd",
+    "name": "Quentin",
+    "seats": [
+      {
+        "number": 10,
+        "requirements": [
+          "gluten",
+          "lactose"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "lark-sayn",
+    "name": "Mabel",
+    "seats": [
+      {
+        "number": 11,
+        "requirements": [
+          "alcohol"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "kite-yqem",
+    "name": "Ingrid",
+    "seats": [
+      {
+        "number": 12
+      }
+    ],
+    "sections": {
+      "signature": {
+        "note": "Thank you for coming all the way from the coast!"
+      }
+    }
+  },
+  {
+    "token": "owl-t4mc",
+    "name": "Wendy",
+    "seats": [
+      {
+        "number": 14,
+        "requirements": [
+          "lactose"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "stork-mnrp",
+    "name": "Trent",
+    "seats": [
+      {
+        "number": 15
+      },
+      {
+        "number": 16,
+        "plusOne": true,
+        "name": "Oscar"
+      }
+    ]
+  },
+  {
+    "token": "robin-xbzp",
+    "name": "Otis",
+    "seats": [
+      {
+        "number": 17
+      }
+    ],
+    "sections": {
+      "main": {
+        "widgets": {
+          "allergy-card": {
+            "visible": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "token": "wren-b7fc",
+    "name": "Imogen",
+    "seats": [
+      {
+        "number": 18,
+        "requirements": [
+          "vegan"
+        ]
+      }
+    ]
+  },
+  {
+    "token": "DmFnSjs_glP7Qu8z8_MRKw",
+    "staff": true
+  }
+]

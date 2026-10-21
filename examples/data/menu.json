@@ -1,0 +1,445 @@
+{
+  "schemaVersion": 1,
+  "coupleNames": "Linus & Maren",
+  "event": {
+    "title": "Wedding dinner",
+    "when": "15 June 2030, 19:00",
+    "place": "Riverside Bistro · Example Street 5"
+  },
+  "invitationLink": {
+    "text": "← Back to the invitation",
+    "href": "/invite/{token}/"
+  },
+  "staff": {
+    "updated": "12 June 2030",
+    "contact": "Selma (wedding planner) · +00 000 000 00 00",
+    "reminder": "Staff link only — please do not show this page to guests."
+  },
+  "requirements": {
+    "nuts": {
+      "letter": "N",
+      "label": "no nuts",
+      "avoids": [
+        "nuts"
+      ]
+    },
+    "gluten": {
+      "letter": "G",
+      "label": "no gluten",
+      "avoids": [
+        "gluten"
+      ]
+    },
+    "lactose": {
+      "letter": "L",
+      "label": "no lactose",
+      "avoids": [
+        "lactose"
+      ]
+    },
+    "vegan": {
+      "letter": "V",
+      "label": "vegan"
+    },
+    "alcohol": {
+      "letter": "A",
+      "label": "no alcohol"
+    }
+  },
+  "allergens": {
+    "nuts": {
+      "label": "nuts"
+    },
+    "gluten": {
+      "label": "gluten"
+    },
+    "lactose": {
+      "label": "lactose"
+    }
+  },
+  "couple": {
+    "label": "Linus · Maren",
+    "members": [
+      {
+        "seat": 6,
+        "name": "Maren",
+        "role": "bride"
+      },
+      {
+        "seat": 7,
+        "name": "Linus",
+        "role": "groom",
+        "requirements": [
+          "gluten"
+        ]
+      }
+    ]
+  },
+  "reservedSeats": [
+    13
+  ],
+  "table": {
+    "label": "L-shaped table",
+    "arms": [
+      {
+        "id": "long",
+        "x": 39,
+        "y": 40,
+        "width": 240,
+        "height": 52
+      },
+      {
+        "id": "short",
+        "x": 227,
+        "y": 40,
+        "width": 52,
+        "height": 210
+      }
+    ],
+    "seats": [
+      {
+        "arm": "long",
+        "side": "left"
+      },
+      {
+        "arm": "long",
+        "side": "top",
+        "count": 6
+      },
+      {
+        "arm": "short",
+        "side": "right",
+        "count": 5
+      },
+      {
+        "arm": "short",
+        "side": "bottom"
+      },
+      {
+        "arm": "short",
+        "side": "left",
+        "count": 2
+      },
+      {
+        "arm": "long",
+        "side": "bottom",
+        "count": 4
+      }
+    ]
+  },
+  "dishes": {
+    "bruschetta": {
+      "name": "Tomato bruschetta",
+      "ingredients": "Sourdough, tomatoes, basil",
+      "staff": {
+        "allergens": [
+          "gluten"
+        ],
+        "swaps": {
+          "gluten": "serve the tomatoes on cucumber slices"
+        }
+      }
+    },
+    "cheese-board": {
+      "name": "Cheese board",
+      "ingredients": "Three cheeses, honey, walnuts",
+      "staff": {
+        "allergens": [
+          "lactose",
+          "nuts"
+        ],
+        "swaps": {
+          "lactose": "bring the fruit plate instead",
+          "nuts": "serve a portion without walnuts on a separate plate"
+        }
+      }
+    },
+    "hummus": {
+      "name": "Hummus with vegetables",
+      "ingredients": "Chickpeas, tahini, carrot, cucumber",
+      "staff": {
+        "allergens": [],
+        "tags": [
+          "vegan",
+          "gluten-free"
+        ]
+      }
+    },
+    "melon": {
+      "name": "Melon with mint",
+      "ingredients": "Melon, mint, lime",
+      "staff": {
+        "allergens": [],
+        "note": "Only when a guest asks for something else"
+      }
+    },
+    "salmon": {
+      "name": "Cured salmon",
+      "ingredients": "Salmon, dill, sour cream",
+      "staff": {
+        "allergens": [
+          "lactose"
+        ],
+        "swaps": {
+          "lactose": "serve the first course without sour cream"
+        }
+      }
+    },
+    "cod": {
+      "name": "Baked cod with an almond crust",
+      "ingredients": "Cod, almonds, spinach",
+      "staff": {
+        "allergens": [
+          "nuts"
+        ],
+        "swaps": {
+          "nuts": "serve the second course without the crust"
+        }
+      }
+    },
+    "carpaccio": {
+      "name": "Beef carpaccio",
+      "ingredients": "Beef, rocket, croutons",
+      "staff": {
+        "allergens": [
+          "gluten"
+        ],
+        "swaps": {
+          "gluten": "serve the first course without croutons"
+        }
+      }
+    },
+    "duck": {
+      "name": "Duck with root vegetables",
+      "ingredients": "Duck, carrot, parsnip, jus",
+      "staff": {
+        "allergens": [],
+        "swaps": {
+          "vegan": "serve the roasted roots with lentils instead"
+        }
+      }
+    }
+  },
+  "sets": {
+    "fish": {
+      "title": "Set A",
+      "hint": "Fish",
+      "eyebrow": "two courses",
+      "courses": [
+        "salmon",
+        "cod"
+      ],
+      "pairing": "white wine"
+    },
+    "meat": {
+      "title": "Set B",
+      "hint": "Meat",
+      "eyebrow": "two courses",
+      "courses": [
+        "carpaccio",
+        "duck"
+      ],
+      "pairing": "red wine"
+    }
+  },
+  "drinks": {
+    "categories": {
+      "sparkling": {
+        "label": "Sparkling"
+      },
+      "white": {
+        "label": "White"
+      },
+      "red": {
+        "label": "Red"
+      },
+      "soft": {
+        "label": "Soft"
+      }
+    },
+    "items": {
+      "fizz": {
+        "category": "sparkling",
+        "name": "Example Brut, Riverside Cellars",
+        "details": "Example Valley · Chardonnay",
+        "servedWith": "with the starters",
+        "staff": {
+          "bottles": "6 bottles",
+          "serving": "well chilled",
+          "swaps": {
+            "alcohol": "alcohol-free sparkling"
+          }
+        }
+      },
+      "white": {
+        "category": "white",
+        "name": "Example White, Hillside Estate",
+        "details": "Example Coast · Sauvignon Blanc",
+        "servedWith": "with Set A",
+        "staff": {
+          "bottles": "4 bottles"
+        }
+      },
+      "red": {
+        "category": "red",
+        "name": "Example Red, Old Mill Winery",
+        "details": "Example Hills · Pinot Noir",
+        "servedWith": "with Set B",
+        "staff": {
+          "bottles": "4 bottles",
+          "serving": "open by 18:30"
+        }
+      },
+      "water": {
+        "category": "soft",
+        "name": "Still and sparkling water"
+      },
+      "juice": {
+        "category": "soft",
+        "name": "Lemonade and apple juice",
+        "staff": {
+          "serving": "jugs on the table from 19:00"
+        }
+      }
+    }
+  },
+  "sections": [
+    {
+      "id": "cover",
+      "type": "cover"
+    },
+    {
+      "id": "seats",
+      "widgets": [
+        {
+          "type": "seating",
+          "staff": {
+            "footnote": "Seat 13 stays free all evening: keep its place setting."
+          }
+        }
+      ]
+    },
+    {
+      "id": "starters",
+      "title": "Starters",
+      "eyebrow": "Shared plates for the table",
+      "staff": {
+        "eyebrow": "Shared plates · on the table by 19:15"
+      },
+      "widgets": [
+        {
+          "type": "dishes",
+          "items": [
+            "bruschetta",
+            "cheese-board",
+            "hummus"
+          ]
+        },
+        {
+          "type": "dishes",
+          "audience": "staff",
+          "title": "On request",
+          "items": [
+            "melon"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "title": "Main course",
+      "eyebrow": "Choose one of two sets",
+      "staff": {
+        "eyebrow": "Two sets · guests choose at the table"
+      },
+      "widgets": [
+        {
+          "type": "sets",
+          "items": [
+            "fish",
+            "meat"
+          ],
+          "note": "Your waiter will take your choice after the starters.",
+          "staff": {
+            "note": "Take the orders once the starters are on the table."
+          }
+        },
+        {
+          "type": "text",
+          "id": "allergy-card",
+          "audience": "guest",
+          "variant": "card",
+          "text": "Something you do not eat? Just tell your waiter: the kitchen will adjust the dishes."
+        }
+      ]
+    },
+    {
+      "id": "drinks",
+      "title": "Drinks",
+      "staff": {
+        "eyebrow": "What to serve and when"
+      },
+      "widgets": [
+        {
+          "type": "drinks",
+          "audience": "guest",
+          "groups": [
+            {
+              "title": "Soft drinks",
+              "layout": "inline",
+              "items": [
+                "water",
+                "juice"
+              ]
+            },
+            {
+              "title": "Wines",
+              "layout": "list",
+              "items": [
+                "fizz",
+                "white",
+                "red"
+              ]
+            }
+          ],
+          "note": "Cocktails on request"
+        },
+        {
+          "type": "drinks",
+          "id": "staff-list",
+          "audience": "staff",
+          "groups": [
+            {
+              "layout": "list",
+              "items": [
+                "fizz",
+                "white",
+                "red",
+                "water",
+                "juice"
+              ]
+            }
+          ],
+          "staff": {
+            "note": "The bar mixes cocktails on request."
+          }
+        }
+      ]
+    },
+    {
+      "id": "signature",
+      "title": "Enjoy the evening!",
+      "audience": "guest",
+      "widgets": [
+        {
+          "type": "text",
+          "variant": "signature",
+          "text": "Linus & Maren"
+        },
+        {
+          "type": "link"
+        }
+      ]
+    }
+  ]
+}

@@ -389,7 +389,7 @@ def guest_plus_one() -> dict:
             widget("text", "main", 2, text=ALLERGY_NOTE, variant="card"),
         ]),
         section("drinks", "Drinks", widgets=[guest_drinks("drinks", 1)]),
-        signature("/i/heron-4tx9/", note="We kept the seats by the window for you."),
+        signature("/invite/heron-4tx9/", note="We kept the seats by the window for you."),
     ])
 
 
@@ -429,7 +429,7 @@ def guest_pair() -> dict:
         section("main", "Main course", widgets=[
             widget("sets", "main", 1, items=sets("s-main--w1", SETS[:1], False), note="",
                    count=1, multiple=False)]),
-        signature("/i/crane-7m2p/"),
+        signature("/invite/crane-7m2p/"),
     ])
 
 

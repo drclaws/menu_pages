@@ -37,7 +37,7 @@ APP_JS = ROOT / "assets" / "app.js"
 #: The files of the output a page refers to.
 PUBLISHED = frozenset({"assets/app.css", "assets/app.js", "assets/favicon.svg"})
 #: The invitations live next to the menu; the link back leads there.
-ALLOW_PATHS = ("/i",)
+ALLOW_PATHS = ("/invite",)
 
 #: The partials: the shared pieces that no value of the data can choose.
 PARTIALS = ("dish-item", "legend", "pills", "scheme", "seat-table", "section-head",
@@ -945,7 +945,7 @@ class WidgetTests(unittest.TestCase):
         self.assertIn('<div class="widget text-widget text-widget--signature prose">\n  '
                       "<p>Ivan &amp; Vera</p>", signature)
         self.assertIn('<p class="widget link-widget"><a class="btn btn--secondary" '
-                      'href="/i/heron-4tx9/">← Back to the invitation</a></p>', signature)
+                      'href="/invite/heron-4tx9/">← Back to the invitation</a></p>', signature)
         self.assertIn('<div class="card section__note">', signature)
         self.assertLess(signature.index("link-widget"), signature.index("section__note"))
 

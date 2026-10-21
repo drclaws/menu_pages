@@ -31,7 +31,7 @@ EVENT = {
     "when": "15 June 2030, 19:00",
     "place": "Riverside Bistro · Example Street 5",
 }
-INVITATION_LINK = {"text": "← Back to the invitation", "href": "/i/{token}/"}
+INVITATION_LINK = {"text": "← Back to the invitation", "href": "/invite/{token}/"}
 COUPLE_LABEL = "Ivan · Vera"
 
 REQUIREMENTS = {

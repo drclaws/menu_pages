@@ -296,7 +296,7 @@ class StringsTest(unittest.TestCase):
         for page in build(menu, guests).guests:
             tree = copy.deepcopy(page.tree)
             links = [w for s in tree["sections"] for w in s["widgets"] if w["type"] == "link"]
-            self.assertEqual([link["href"] for link in links], [f"/i/{page.token}/"])
+            self.assertEqual([link["href"] for link in links], [f"/invite/{page.token}/"])
             for link in links:
                 link["href"] = ""
             self.assertNotIn(page.token, dump(tree))

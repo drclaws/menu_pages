@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builder of personal dinner-menu pages.
 
-    python build.py validate --data DIR
-    python build.py build
+    python build.py build    [--data DIR] [--out DIR] [--base-path PATH] [--allow-path PATH]...
+    python build.py validate [--data DIR]
 
 The builder writes a page per guest and a staff page for the restaurant, each
 at a secret address `<base path>/<token>/`.  Only the Python 3 standard library
@@ -11,15 +11,31 @@ is used (Python >= 3.10).
 `validate` reads `menu.json` and `guests.json` in DIR (by default
 `examples/data` next to this script), checks them, builds the page trees in
 memory (that is how it learns what the pages show) and prints a summary.
+
+`build` does the same and renders every page with `template.html` and its
+fragments, then writes the output: `<token>/index.html` for every guest record
+and for the staff record, and `assets/` with the style sheet and the script of
+the code and `favicon.svg`, generated from the design tokens of
+`assets/app.css` - nothing else.  The output is assembled next to `--out`
+(`dist` in the current directory by default) and replaces it only when every
+check has passed: nothing but the expected files, no external resources, no
+inline scripts or styles, every local URL resolves inside the output.  Its
+contents are published under `--base-path` (`/` by default): every URL of the
+output starts with it.  A link (`<a href>`, `<area href>`) to a directory of
+the site that the build does not write is allowed by `--allow-path` and is not
+looked up.  Two builds of the same data are identical byte for byte.
+
 Warnings and errors go to stderr; they never quote the data, and a token that
-is part of a path in a message is hidden.  `build` is not implemented yet: it
-reports so on stderr and exits with code 2.
+is part of a path in a message is hidden.  A message about a record names it
+`guests.json: guest #N`, N being its position in `guests.json` (the staff
+record counts too).
 
 Importing this module has no side effects: everything happens inside `main()`.
 
-Exit codes: 0 - success (`--help`, valid data), 1 - errors in the data, or the
-invitations builder is missing in `site/` (the submodule is not checked out),
-2 - bad command line or a command that is not implemented yet.
+Exit codes: 0 - success (`--help`, valid data, a finished build), 1 - errors
+in the data or in the finished output, an output directory that is not
+replaced, or the invitations builder is missing in `site/` (the submodule is
+not checked out), 2 - bad command line.
 """
 
 import argparse
@@ -36,6 +52,19 @@ EXIT_USAGE = 2
 #: The directory of this script; the default data directory is relative to it.
 CODE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = Path("examples") / "data"
+#: Relative to the current working directory.
+DEFAULT_OUT_DIR = Path("dist")
+DEFAULT_BASE_PATH = "/"
+
+TEMPLATE_FILE = "template.html"
+#: The files the pages share, in the code and in the output.
+ASSETS_DIR = "assets"
+#: The style sheet whose design tokens colour the pages and the icon.
+TOKENS_FILE = "app.css"
+#: The icon the build writes into `assets/` of the output.
+FAVICON_FILE = "favicon.svg"
+#: The submodule with the code of the invitations builder.
+SITE_DIR = "site"
 
 #: The commands and their one-line descriptions.
 COMMANDS = {
@@ -44,20 +73,83 @@ COMMANDS = {
 }
 
 
+# The types of the arguments load the bridge when they are first used: `--help`
+# works without the submodule, and `main` reports a missing one.
+
+
+def _base_path_type(value: str) -> str:
+    """`build --base-path`: the rule of the invitations (a bad value is a bad
+    command line, and it is not repeated)."""
+    from menu_tools import _core
+
+    return _core.base_path_argument(value)
+
+
+def _allow_path_type(value: str) -> str:
+    """One `build --allow-path`: the rule of the invitations."""
+    from menu_tools import _core
+
+    return _core.allow_path_argument(value)
+
+
+def _check_build_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """`--allow-path` against `--base-path`: both are known only after the
+    parsing; a refused value is a usage error (code 2)."""
+    from menu_tools import _core
+
+    args.base_path = args.base_path or DEFAULT_BASE_PATH
+    try:
+        args.allow_paths = _core.check_allow_paths(args.allow_paths or (), args.base_path)
+    except ValueError as exc:
+        parser.error(f"argument --allow-path: {exc}")
+
+
 def make_parser() -> argparse.ArgumentParser:
-    """The command line parser: a required subcommand (build or validate)."""
+    """The command line parser: a required subcommand."""
     parser = argparse.ArgumentParser(
         prog=Path(__file__).name,
         description="Builder of personal dinner-menu pages.",
     )
     commands = parser.add_subparsers(dest="command", metavar="command", required=True)
-    commands.add_parser("build", help=COMMANDS["build"], description=COMMANDS["build"])
-    validate = commands.add_parser("validate", help=COMMANDS["validate"], description=COMMANDS["validate"])
-    validate.add_argument(
-        "--data",
+
+    def add_data_option(command: argparse.ArgumentParser) -> None:
+        command.add_argument(
+            "--data",
+            metavar="DIR",
+            help=f"data directory with menu.json and guests.json (default: {DEFAULT_DATA_DIR} next to build.py)",
+        )
+
+    build = commands.add_parser("build", help=COMMANDS["build"], description=COMMANDS["build"])
+    add_data_option(build)
+    build.add_argument(
+        "--out",
         metavar="DIR",
-        help=f"data directory with menu.json and guests.json (default: {DEFAULT_DATA_DIR} next to build.py)",
+        help="output directory: <token>/index.html for every page and assets/, nothing else; "
+        f"replaced on every build (default: {DEFAULT_OUT_DIR})",
     )
+    build.add_argument(
+        "--base-path",
+        metavar="PATH",
+        type=_base_path_type,
+        help="path from the root of the site under which the contents of --out are published, "
+        "e.g. /menu: every URL of the output starts with it and a page is PATH/<token>/ "
+        f"(default: {DEFAULT_BASE_PATH})",
+    )
+    build.add_argument(
+        "--allow-path",
+        metavar="PATH",
+        dest="allow_paths",
+        action="append",
+        type=_allow_path_type,
+        help="a directory of the site that the build does not write, e.g. the invitations next "
+        "to the menu: links of the pages under it are allowed and not looked up in the output "
+        "(resources there are still errors); apart from --base-path and from the output, never "
+        "'/'; may be repeated",
+    )
+    build.set_defaults(check_arguments=lambda args: _check_build_arguments(build, args))
+
+    validate = commands.add_parser("validate", help=COMMANDS["validate"], description=COMMANDS["validate"])
+    add_data_option(validate)
     return parser
 
 
@@ -112,6 +204,13 @@ def summary(data: Data) -> str:
     )
 
 
+def pages_of(data: Data) -> list:
+    """Every page (`menu_tools._page.Page`): the guests in the order of
+    `guests.json`, then the staff page, if any."""
+    staff = [data.trees.staff] if data.trees.staff is not None else []
+    return [*data.trees.guests, *staff]
+
+
 def _stdout(message: str) -> None:
     # Flushed on every line so that stdout and stderr stay in order in CI logs.
     print(message, flush=True)
@@ -133,10 +232,197 @@ def cli_report() -> Any:
     return report
 
 
+def _data_dir(args: argparse.Namespace) -> Path:
+    return Path(args.data) if args.data is not None else CODE_DIR / DEFAULT_DATA_DIR
+
+
 def cmd_validate(args: argparse.Namespace, report: Any) -> int:
-    data_dir = Path(args.data) if args.data is not None else CODE_DIR / DEFAULT_DATA_DIR
-    _stdout(summary(load_data(data_dir, report)))
+    _stdout(summary(load_data(_data_dir(args), report)))
     return EXIT_OK
+
+
+# --------------------------------------------------------------------------
+# build
+# --------------------------------------------------------------------------
+
+
+def _real(path: Path) -> Path:
+    return Path(os.path.realpath(Path(path).absolute()))
+
+
+def _same(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return first == second
+
+
+def is_inside(path: Path, directory: Path, *, strict: bool = False) -> bool:
+    """True when `path` lies inside `directory` (or is it, unless `strict`),
+    symbolic links resolved and letter case as the file system sees it."""
+    resolved, target = _real(path), _real(directory)
+    candidates = resolved.parents if strict else (resolved, *resolved.parents)
+    return any(_same(candidate, target) for candidate in candidates)
+
+
+def check_out(out_dir: Path, data_dir: Path) -> None:
+    """Refuse an `--out` whose replacement would destroy anything.
+
+    The menu's own refusals come first - not inside `site/`, the code of the
+    invitations builder, and not inside `--data` - then the rules of the
+    invitations (`check_out_dir`): not the code, the data or the working
+    directory nor a parent of one, not inside `assets/` of the code, and an
+    existing directory only when it looks like a previous build.  The
+    messages never repeat a path: the data is not read yet, so no token is
+    known to hide.
+    """
+    from menu_tools import _core
+
+    if is_inside(out_dir, CODE_DIR / SITE_DIR):
+        raise _core.BuildError(
+            f"--out must not be {SITE_DIR}/ or lie inside it: it holds the code of the "
+            "invitations builder; choose a separate output directory"
+        )
+    if is_inside(out_dir, data_dir, strict=True):
+        raise _core.BuildError(
+            "--out must not lie inside the data directory (--data): the build never writes "
+            "there; choose a separate output directory"
+        )
+    _core.check_out_dir(out_dir, code_dir=CODE_DIR, data_dir=data_dir, media_dir=data_dir)
+
+
+def load_palette() -> Any:
+    """The colours of the design tokens of `assets/app.css` (the colour of the
+    browser interface and the icon); `assets/favicon.svg` of the code would
+    take the place of the generated icon and is refused."""
+    from menu_tools import _core
+
+    assets = CODE_DIR / ASSETS_DIR
+    try:
+        taken = sorted(name for name in os.listdir(assets) if name.lower() == FAVICON_FILE)
+    except OSError:
+        taken = []  # reported when the assets are copied
+    if taken:
+        raise _core.BuildError(
+            f"{ASSETS_DIR}/{taken[0]} of the code collides with the icon that the build "
+            "generates from the design tokens; remove it"
+        )
+    try:
+        return _core.load_palette(assets / TOKENS_FILE)
+    except _core.TokenError as exc:
+        raise _core.BuildError(
+            f"{ASSETS_DIR}/{exc} (the colour of the browser interface and the icon are "
+            "taken from the design tokens)"
+        ) from None
+
+
+def render_page(template: Any, tree: dict) -> str:
+    """One page: the template rendered on its tree, without HTML comments
+    (notes of the template are never published)."""
+    from menu_tools import _core
+
+    return _core.strip_html_comments(template.render(tree), template.name)
+
+
+def render_pages(template: Any, pages: list) -> list[tuple[str, str]]:
+    """(token, HTML) of every page, rendered in memory: a broken template
+    leaves no half-written output behind.
+
+    A problem of the template is reported once for all the pages it hits:
+    `guests.json: guest #N: <problem>` for one record,
+    `<k> guest record(s): <problem>; first: guests.json: guest #N` for more.
+    """
+    from menu_tools import _core, _schema
+
+    rendered: list[tuple[str, str]] = []
+    failures: dict[str, list[int]] = {}  # problem -> numbers of the records
+    for page in pages:
+        try:
+            rendered.append((page.token, render_page(template, page.tree)))
+        except _core.TemplateError as exc:
+            failures.setdefault(str(exc), []).append(page.number)
+    if failures:
+        raise _core.ValidationError(
+            f"{_schema.guest_where(numbers[0])}: {problem}"
+            if len(numbers) == 1
+            else f"{len(numbers)} guest record(s): {problem}; first: {_schema.guest_where(min(numbers))}"
+            for problem, numbers in failures.items()
+        )
+    return rendered
+
+
+def write_favicon(path: Path, palette: Any) -> None:
+    from menu_tools import _core
+
+    try:
+        path.write_bytes(_core.favicon_svg(palette))
+    except OSError as exc:
+        raise _core.BuildError(f"cannot write {ASSETS_DIR}/{FAVICON_FILE}: {exc.strerror}") from None
+
+
+def cmd_build(args: argparse.Namespace, report: Any) -> int:
+    """Check `--out`, read the data, render the pages, write the output next
+    to `--out`, check it and swap it in; the log shows counters and paths
+    (directories named after tokens are hidden), never data."""
+    from menu_tools import _core, _output, _page
+
+    data_dir = _data_dir(args)
+    out_dir = Path(args.out) if args.out is not None else DEFAULT_OUT_DIR
+    base_path = args.base_path or DEFAULT_BASE_PATH
+    allow_paths = tuple(args.allow_paths or ())
+
+    def log(message: str) -> None:
+        _stdout(report.redact(message))
+
+    check_out(out_dir, data_dir)
+    palette = load_palette()
+    settings = _page.Settings(_core.assets_url_path(base_path), _core.hex_color(palette.surface))
+    data = load_data(data_dir, report, settings)
+    pages = pages_of(data)
+    tokens = [page.token for page in pages]
+    try:
+        # at the base path `/` an allowed path must not lead into a page either
+        _core.check_allow_paths(allow_paths, base_path, tokens)
+    except ValueError as exc:
+        raise _core.BuildError(f"an allowed path (--allow-path) {exc}") from None
+    staff = " + staff" if data.trees.staff is not None else ""
+    log(f"build: {data.index.guests} guest record(s){staff} validated (data: {_core.display_path(data_dir)})")
+
+    template = _core.load_template(CODE_DIR / TEMPLATE_FILE)
+    rendered = render_pages(template, pages)
+    with _core._StagedOutput(out_dir, warn=report.warn) as temporary:
+        written = _core.write_pages(temporary, rendered)
+        copied = _core.copy_assets(CODE_DIR / ASSETS_DIR, temporary / ASSETS_DIR)
+        write_favicon(temporary / ASSETS_DIR / FAVICON_FILE, palette)
+        stats = _output.check_menu_output(temporary, tokens, base_path=base_path, allow_paths=allow_paths)
+
+    out_shown = _core.display_path(out_dir)
+    log(f"build: wrote {written} page(s) to {out_shown}/<token>/")
+    log(
+        f"build: base path {base_path}: the pages are at {base_path.rstrip('/')}/<token>/, "
+        f"the shared files at {_core.assets_url_path(base_path)}/"
+    )
+    log(f"build: links allowed outside the output: {', '.join(allow_paths) or 'none'}")
+    log(
+        f"build: copied {copied} asset file(s) to {out_shown}/{ASSETS_DIR}/, "
+        f"{FAVICON_FILE} generated from the design tokens"
+    )
+    log(
+        f"build: OK -> {out_shown} ({written} page(s), {stats.files} file(s) in total, "
+        f"{_core.format_size(stats.size)})"
+    )
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------
+# Running a command
+# --------------------------------------------------------------------------
+
+#: The function of every command.
+COMMAND_FUNCTIONS = {
+    "build": cmd_build,
+    "validate": cmd_validate,
+}
 
 
 def debug_enabled() -> bool:
@@ -160,6 +446,16 @@ def run_command(command: Any, args: argparse.Namespace) -> int:
         _stderr(f"error: {report.redact(exc)}")
         _stderr(f"{args.command}: failed")
         return EXIT_ERROR
+    except OSError as exc:
+        # before the data is read no token is known to hide: the file is not
+        # named then (it may lie in the directory of a page)
+        where = f": {_core.display_path(exc.filename)}" if exc.filename and report.tokens else ""
+        _stderr(f"error: {report.redact(f'{exc.strerror or type(exc).__name__}{where}')}")
+        _stderr(f"{args.command}: failed")
+        return EXIT_ERROR
+    except KeyboardInterrupt:  # pragma: no cover - interactive use
+        _stderr(f"{args.command}: interrupted")
+        return EXIT_ERROR
     except Exception as exc:  # unexpected: report without leaking data
         if debug_enabled():
             traceback.print_exc()
@@ -174,19 +470,20 @@ def run_command(command: Any, args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the command line; argparse exits by itself on `--help` and usage errors."""
-    args = make_parser().parse_args(argv)
+    """Run the command line; argparse exits by itself on `--help` and usage
+    errors (code 2)."""
     try:
+        args = make_parser().parse_args(argv)
         from menu_tools import _core  # noqa: F401  (loads the invitations builder)
     except ImportError as exc:
         if exc.name != "invitations_build":  # not the bridge's own error
             raise
         _stderr(f"error: {exc}")
         return EXIT_ERROR
-    if args.command == "validate":
-        return run_command(cmd_validate, args)
-    _stderr(f"error: '{args.command}' is not implemented yet")
-    return EXIT_USAGE
+    check_arguments = getattr(args, "check_arguments", None)
+    if check_arguments is not None:
+        check_arguments(args)
+    return run_command(COMMAND_FUNCTIONS[args.command], args)
 
 
 if __name__ == "__main__":

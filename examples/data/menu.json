@@ -6,10 +6,6 @@
     "when": "15 June 2030, 19:00",
     "place": "Riverside Bistro · Example Street 5"
   },
-  "invitationLink": {
-    "text": "← Back to the invitation",
-    "href": "/invite/{token}/"
-  },
   "staff": {
     "updated": "12 June 2030",
     "contact": "Selma (wedding planner) · +00 000 000 00 00",
@@ -435,9 +431,6 @@
           "type": "text",
           "variant": "signature",
           "text": "Linus & Maren"
-        },
-        {
-          "type": "link"
         }
       ]
     }

@@ -36,8 +36,6 @@ APP_JS = ROOT / "assets" / "app.js"
 
 #: The files of the output a page refers to.
 PUBLISHED = frozenset({"assets/app.css", "assets/app.js", "assets/favicon.svg"})
-#: The invitations live next to the menu; the link back leads there.
-ALLOW_PATHS = ("/invite",)
 
 #: The partials: the shared pieces that no value of the data can choose.
 PARTIALS = ("dish-item", "legend", "pills", "scheme", "seat-table", "section-head",
@@ -76,7 +74,6 @@ GUEST_ONLY = frozenset({
     "scheme.labels", "scheme.mine", "scheme.single",
     *(f"schemeLabel.{field}" for field in T.NODES["schemeLabel"]),
     "drinks.groups", *(f"group.{field}" for field in T.NODES["group"]),
-    *(f"link.{field}" for field in T.NODES["widget:link"] if field not in T.WIDGET_COMMON_FIELDS),
 })
 
 #: The words of the interface: they live in the fragments, never in the tree.
@@ -154,7 +151,7 @@ def render_strict(tree: dict, template: core.Template, reads: set[str] | None = 
 
 
 def html_problems(page: str) -> list[tuple[int, str]]:
-    return core.check_html(page, PUBLISHED.__contains__, allow_paths=ALLOW_PATHS)
+    return core.check_html(page, PUBLISHED.__contains__)
 
 
 def sections_of(tree: dict, section_id: str) -> dict:
@@ -365,6 +362,8 @@ class FragmentFilesTests(unittest.TestCase):
 
     def test_the_files_are_the_types_and_the_partials(self):
         fragments = core.load_fragments(FRAGMENTS_DIR)
+        self.assertEqual(T.SECTION_TYPES, _schema.SECTION_TYPES)
+        self.assertEqual(T.WIDGET_TYPES, _schema.WIDGET_TYPES)
         self.assertEqual(fragments.names("sections"), sorted(T.SECTION_TYPES))
         self.assertEqual(fragments.names("widgets"), sorted(T.WIDGET_TYPES))
         self.assertEqual(fragments.names("partials"), sorted(PARTIALS))
@@ -412,6 +411,17 @@ class FragmentFilesTests(unittest.TestCase):
                       '<!-- if:isStaff --><div class="container"><!-- endif -->',
                       self.sources["sections/custom"])
         self.assertNotIn("data-reveal", TEMPLATE.read_text(encoding="utf-8"))
+
+    def test_no_links_in_the_markup(self):
+        # the pages lead nowhere: the only addresses are the shared files in <head>
+        sources = dict(self.sources, template=TEMPLATE.read_text(encoding="utf-8"))
+        for name, source in sources.items():
+            markup = re.sub(r"<!--.*?-->", "", source, flags=re.S)
+            with self.subTest(file=name):
+                self.assertNotRegex(markup, r"(?i)<(?:a|area)[\s/>]")
+                addresses = re.findall(r'(?i)\b(?:href|src)\s*=\s*"([^"]*)"', markup)
+                self.assertEqual(addresses, ["{{faviconPath}}", "{{assetsPath}}/app.css",
+                                             "{{assetsPath}}/app.js"] if name == "template" else [])
 
     def test_no_styles_or_inline_scripts_in_the_markup(self):
         sources = dict(self.sources, template=TEMPLATE.read_text(encoding="utf-8"))
@@ -933,7 +943,7 @@ class WidgetTests(unittest.TestCase):
         self.assertIn("seat 1 — no alcohol", items[0])
         self.assertIn("Cocktails only on request; the bar has the list.", widget)
 
-    def test_the_text_widgets_and_the_link(self):
+    def test_the_text_widgets(self):
         welcome = self.section("guest-without-table", "welcome")
         self.assertIn('<div class="widget text-widget text-widget--lead prose">', welcome)
         self.assertIn("<p>The kitchen closes at 22:00.<br>Dessert is served at the bar.</p>",
@@ -944,10 +954,9 @@ class WidgetTests(unittest.TestCase):
         signature = self.section("guest-plus-one", "signature")
         self.assertIn('<div class="widget text-widget text-widget--signature prose">\n  '
                       "<p>Ivan &amp; Vera</p>", signature)
-        self.assertIn('<p class="widget link-widget"><a class="btn btn--secondary" '
-                      'href="/invite/heron-4tx9/">← Back to the invitation</a></p>', signature)
         self.assertIn('<div class="card section__note">', signature)
-        self.assertLess(signature.index("link-widget"), signature.index("section__note"))
+        self.assertLess(signature.index("text-widget--signature"), signature.index("section__note"))
+        self.assertEqual(signature.count('class="widget '), 1)
 
     def test_the_head_of_a_section(self):
         starters = self.section("guest-plus-one", "starters")

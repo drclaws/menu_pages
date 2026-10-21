@@ -9,11 +9,12 @@ Privacy by construction.  A guest page is built from two projections only:
 `public_menu` (the shared texts outside the `staff` keys and outside the
 parts for the staff only, the names and ingredients of the dishes the guests
 see, their sets and the guest fields of their drinks, the label and the seats
-of the couple, the table) and `own_record` (the token, the name, the seat
-numbers and which of them a companion takes, the switches and notes of the
-sections).  Other records, requirements, allergens and the names of the
-seats never reach the code of a guest page.  The staff page reads the whole
-menu and the records without their tokens and notes.
+of the couple, the table) and `own_record` (the name, the seat numbers and
+which of them a companion takes, the switches and notes of the sections).
+Tokens, other records, requirements, allergens and the names of the seats
+never reach the code of a guest page.  The staff page reads the whole menu
+and the records without their tokens and notes.  No page holds a token: the
+token of a record names the directory of its page and nothing else.
 
 The words that are joined with numbers and names come from
 `menu_tools._words`; the scheme of the table is the object of
@@ -28,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from menu_tools import _table, _words
-from menu_tools._schema import EVENT_FIELDS, MENU_FILE, TOKEN_PLACEHOLDER, guest_where
+from menu_tools._schema import EVENT_FIELDS, MENU_FILE, guest_where
 
 #: The "You" and "+1" marks are given only up to this many seats of a record.
 MAX_MARKED_SEATS = 2
@@ -192,11 +193,9 @@ def public_menu(menu: dict) -> dict:
     drink no part for the guests refers to.
     """
     couple = menu.get("couple") or {}
-    link = menu.get("invitationLink")
     public: dict[str, Any] = {
         "coupleNames": menu["coupleNames"],
         "event": {key: menu["event"][key] for key in EVENT_FIELDS},
-        "invitationLink": {"text": link["text"], "href": link["href"]} if link else None,
         "couple": _couple(couple),
         "table": menu.get("table"),
         "dishes": {},
@@ -279,8 +278,8 @@ def _public_dish(menu: dict, dish_id: str, public: dict) -> None:
 def own_record(record: dict) -> dict:
     """The part of a record its own page is built from.
 
-    The names of the seats and their requirements are left out: the page of
-    a guest shows neither (a companion is "your guest").
+    The token, the names of the seats and their requirements are left out:
+    the page of a guest shows none of them (a companion is "your guest").
     """
     sections = {}
     for section_id, override in (record.get("sections") or {}).items():
@@ -293,7 +292,6 @@ def own_record(record: dict) -> dict:
             },
         }
     return {
-        "token": record["token"],
         "name": record["name"],
         "seats": [
             {"number": seat["number"], "plusOne": seat.get("plusOne") is True}
@@ -393,12 +391,6 @@ class _GuestPage:
                     ],
                 })
             return {**base, "groups": groups, "list": [], "note": widget["note"]}
-        if kind == "link":
-            link = public["invitationLink"]
-            if link is None:
-                return None
-            href = link["href"].replace(TOKEN_PLACEHOLDER, self.own["token"])
-            return {**base, "href": href, "text": link["text"]}
         raise ValueError(f"unknown widget type: {kind}")  # pragma: no cover - checked data
 
     def seating(self, widget: dict, base: dict) -> dict:
@@ -603,8 +595,6 @@ class _StaffPage:
                     })
                 self.usage.drinks.update(group["items"])
             return {**base, "groups": [], "list": listed, "note": _text(staff.get("note"))}
-        if kind == "link":
-            return None  # the link leads to the invitation of a guest
         raise ValueError(f"unknown widget type: {kind}")  # pragma: no cover - checked data
 
     def dish(self, dish_id: str) -> dict:

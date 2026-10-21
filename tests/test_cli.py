@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import build  # noqa: E402  (imported after sys.path is prepared)
-from tests import fixtures, support  # noqa: E402
+from tests import fixtures  # noqa: E402
 
 SCRIPT = ROOT / "build.py"
 
@@ -144,7 +144,6 @@ class CliTest(unittest.TestCase):
             base = Path(temporary).resolve()
             menu, guests = fixtures.reserved19()
             data = fixtures.write_data(base / "data", menu, guests)
-            allowed = support.allowed_path(menu)
             work = base / "work"
             work.mkdir()
             out = base / "out"
@@ -152,7 +151,7 @@ class CliTest(unittest.TestCase):
                 ("--help",),
                 (),
                 ("build", "--data", str(base / "nowhere"), "--out", str(out)),
-                ("build", "--data", str(data), "--out", str(out), "--allow-path", allowed),
+                ("build", "--data", str(data), "--out", str(out)),
                 ("validate", "--data", str(data)),
                 ("token", "--prefix", "a b"),
                 ("links", "--url", "ftp://example.org/menu", "--data", str(data)),
@@ -261,7 +260,7 @@ class BuildArgumentsTest(unittest.TestCase):
     def test_the_allowed_paths_may_be_repeated(self):
         menu, guests = fixtures.reserved19()
         data = fixtures.write_data(self.base / "data", menu, guests)
-        allowed = support.allowed_path(menu)
+        allowed = "/elsewhere"
         result = run_main("build", "--data", str(data), "--out", str(self.base / "out"),
                           "--allow-path", allowed, "--allow-path", "/other/", "--allow-path", allowed + "/")
         self.assertEqual(result.returncode, 0, result.stderr)

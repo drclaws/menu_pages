@@ -34,7 +34,7 @@ from typing import Iterator
 #: The types of sections and widgets: the names of the files in
 #: fragments/sections/ and fragments/widgets/.
 SECTION_TYPES = ("cover", "custom")
-WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks", "link")
+WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks")
 
 #: The fields every widget has, whatever its type.
 WIDGET_COMMON_FIELDS = ("type", "domId", "labelledBy")
@@ -53,7 +53,6 @@ NODES = {
     "widget:dishes": WIDGET_COMMON_FIELDS + ("title", "items"),
     "widget:sets": WIDGET_COMMON_FIELDS + ("items", "note", "count", "multiple"),
     "widget:drinks": WIDGET_COMMON_FIELDS + ("groups", "list", "note"),
-    "widget:link": WIDGET_COMMON_FIELDS + ("href", "text"),
     "mySeat": ("number", "mark"),
     "legend": ("letter", "label"),
     "row": ("number", "name", "isPlusOne", "hostName", "roleLabel", "isCouple", "isFree",
@@ -144,7 +143,6 @@ COUPLE = "Ivan & Vera"
 EVENT = {"title": "Wedding dinner", "when": "15 June 2030, 19:00",
          "place": "Riverside Bistro · Example Street 5"}
 ASSETS = "/assets"
-BACK = "← Back to the invitation"
 
 
 def root(*, staff_page: bool, sections: list, staff: dict | None = None,
@@ -315,11 +313,10 @@ def staff_drinks(section_id: str, number: int) -> dict:
     ], note="Cocktails only on request; the bar has the list.")
 
 
-def signature(link_href: str, note: str = "") -> dict:
-    """The closing section of a guest's page: the names and the way back."""
+def signature(note: str = "") -> dict:
+    """The closing section of a guest's page: the names of the couple."""
     return section("signature", "Enjoy the evening!", note=note, widgets=[
         widget("text", "signature", 1, text=COUPLE, variant="signature"),
-        widget("link", "signature", 2, href=link_href, text=BACK),
     ])
 
 
@@ -389,7 +386,7 @@ def guest_plus_one() -> dict:
             widget("text", "main", 2, text=ALLERGY_NOTE, variant="card"),
         ]),
         section("drinks", "Drinks", widgets=[guest_drinks("drinks", 1)]),
-        signature("/invite/heron-4tx9/", note="We kept the seats by the window for you."),
+        signature(note="We kept the seats by the window for you."),
     ])
 
 
@@ -429,7 +426,7 @@ def guest_pair() -> dict:
         section("main", "Main course", widgets=[
             widget("sets", "main", 1, items=sets("s-main--w1", SETS[:1], False), note="",
                    count=1, multiple=False)]),
-        signature("/invite/crane-7m2p/"),
+        signature(),
     ])
 
 

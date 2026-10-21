@@ -51,7 +51,6 @@ MENU_FIELDS = (
     "schemaVersion",
     "coupleNames",
     "event",
-    "invitationLink",
     "staff",
     "requirements",
     "allergens",
@@ -64,7 +63,6 @@ MENU_FIELDS = (
     "sections",
 )
 EVENT_FIELDS = ("title", "when", "place")
-LINK_FIELDS = ("text", "href")
 ROOT_STAFF_FIELDS = ("updated", "contact", "reminder")
 REQUIREMENT_FIELDS = ("letter", "label", "tag", "avoids")
 ALLERGEN_FIELDS = ("label",)
@@ -84,7 +82,7 @@ SECTION_FIELDS = {
     "custom": ("id", "type", "visible", "audience", "title", "eyebrow", "staff", "widgets"),
 }
 SECTION_STAFF_FIELDS = ("title", "eyebrow")
-WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks", "link")
+WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks")
 WIDGET_BASE_FIELDS = ("type", "id", "visible", "audience")
 WIDGET_FIELDS = {
     "text": ("text", "variant"),
@@ -92,7 +90,6 @@ WIDGET_FIELDS = {
     "dishes": ("items", "title"),
     "sets": ("items", "note", "staff"),
     "drinks": ("groups", "note", "staff"),
-    "link": (),
 }
 #: The fields under the `staff` key of a widget: what only the staff page shows.
 WIDGET_STAFF_FIELDS = {"seating": ("footnote",), "sets": ("note",), "drinks": ("note",)}
@@ -118,9 +115,9 @@ STAFF_TOKEN_MIN = 16
 #: How many known ids a message lists at most.
 MAX_LISTED = 8
 
-#: Stands for the token of the guest in `invitationLink.href`.
+#: The placeholder of a token: no text of the menu may hold it, the pages of
+#: the menu hold no token.
 TOKEN_PLACEHOLDER = "{token}"
-_SEGMENT_RE = re.compile(r"[A-Za-z0-9_-]+")
 _LETTER_RE = re.compile(r"[A-Z]")
 
 _STAFF_ONLY_HINT = "is not allowed in the staff record: it has a token and nothing else"
@@ -229,14 +226,15 @@ def guest_known(index: MenuIndex) -> frozenset[str]:
 
 
 def _braces(check: _Checker, value: Any, where: Sequence) -> bool:
-    """False (and an error) for a text with template syntax or the token."""
+    """False (and an error) for a text with template syntax or the
+    placeholder of a token."""
     if not isinstance(value, str):
         return True
     if "{{" in value or "}}" in value:
         check.error(where, "must not contain '{{' or '}}' (the texts of the menu have no template syntax)")
         return False
     if TOKEN_PLACEHOLDER in value:
-        check.error(where, "must not contain '{token}': it works only in 'invitationLink.href'")
+        check.error(where, "must not contain '{token}': the pages of the menu hold no token")
         return False
     return True
 
@@ -342,21 +340,6 @@ def _badges(
         check.error(where, f"needs {len(requirements)} badges, seat {number} has room for {room}")
 
 
-def href_problem(href: str) -> str | None:
-    """The problem of `invitationLink.href`, or None when it is a path from
-    the site root with exactly one `{token}` segment and a final '/'."""
-    if not href.startswith("/") or href.startswith("//"):
-        return "must be a path from the site root, starting with a single '/'"
-    if not href.endswith("/"):
-        return "must end with '/'"
-    segments = href[1:-1].split("/") if href != "/" else []
-    if any(segment != TOKEN_PLACEHOLDER and not _SEGMENT_RE.fullmatch(segment) for segment in segments):
-        return "may only hold path segments of A-Z, a-z, 0-9, '_' and '-', and '{token}' as a whole segment"
-    if segments.count(TOKEN_PLACEHOLDER) != 1:
-        return "must hold '{token}' exactly once (the page of the same guest)"
-    return None
-
-
 # --------------------------------------------------------------------------
 # menu.json
 # --------------------------------------------------------------------------
@@ -381,14 +364,6 @@ def check_menu(menu: Any, report: Any, where: str = MENU_FILE) -> MenuIndex:
     if event is not None:
         for key in EVENT_FIELDS:
             _line(check, event, key, ("event",), required=True)
-    link = _object(check, menu, "invitationLink", (), LINK_FIELDS)
-    if link is not None:
-        _line(check, link, "text", ("invitationLink",), required=True)
-        href = check.value(link, "href", "string", ("invitationLink",), required=True)
-        if href is not MISSING:
-            problem = href_problem(href)
-            if problem:
-                check.error(("invitationLink", "href"), problem)
     staff = _object(check, menu, "staff", (), ROOT_STAFF_FIELDS)
     if staff is not None:
         _line(check, staff, "updated", ("staff",))
@@ -699,7 +674,6 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
     if not sections:
         check.error(("sections",), "must list at least one section")
     seating = 0
-    links = 0
     covers: list[int] = []
     positions: dict[str, int] = {}
     for position, section in enumerate(sections):
@@ -752,11 +726,8 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
                 check, widget, (*parts, "widgets", number), index, section_id, audience, hidden_for_staff
             )
             seating += kind_of_widget == "seating"
-            links += kind_of_widget == "link"
     if seating > 1:
         check.error(("sections",), f"has {seating} seating widgets; there may be only one")
-    if links and "invitationLink" not in menu:
-        check.warning(("sections",), "has a 'link' widget, but there is no 'invitationLink': the widget shows nothing")
     if sections and not covers:
         check.warning(("sections",), "has no 'cover' section: the page will have no main heading")
 
@@ -862,8 +833,6 @@ def _check_widget(
                 _line(check, group, "title", group_parts)
                 check.choice(group, "layout", GROUP_LAYOUTS, group_parts)
                 check.ref_list(group, "items", group_parts, index.drinks, "drink", required=True, allow_empty=False)
-    elif kind == "link" and compatible and effective == "staff":
-        check.error(parts, "is a link to the invitation of a guest: it cannot be for the staff only")
     return kind
 
 
@@ -1190,5 +1159,4 @@ __all__ = [
     "guest_known",
     "guest_label",
     "guest_where",
-    "href_problem",
 ]

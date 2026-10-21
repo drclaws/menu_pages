@@ -1064,6 +1064,110 @@ class DataLayerPageTests(unittest.TestCase):
                          if re.search(r"(?<!\w)%s(?!\w)" % re.escape(item), text)]
                 self.assertEqual(leaks, [])
 
+    # --- the plan of the table on the pages of the data sets ---
+
+    def plan_pages(self, name: str) -> list[tuple[str, dict, dict, str]]:
+        """(label, tree, plan, drawing) of every page of a data set with a plan."""
+        found = []
+        for label, tree, document, _reads in self.pages:
+            if label.startswith(f"{name}: "):
+                plan = widgets_of(tree, "seating")[0]["scheme"]
+                if plan is not None:
+                    found.append((label, tree, plan, element(document, "scheme")))
+        return found
+
+    def guest_plan(self, name: str, seats: list[tuple[int, str]]) -> tuple[dict, str]:
+        """The plan and the drawing of the guest whose own seats are `seats`."""
+        found = [(plan, drawing) for label, tree, plan, drawing in self.plan_pages(name)
+                 if not tree["isStaff"]
+                 and [(seat["number"], seat["mark"])
+                      for seat in widgets_of(tree, "seating")[0]["mySeats"]] == seats]
+        self.assertEqual(len(found), 1, seats)
+        return found[0]
+
+    @staticmethod
+    def nearest_seat(plan: dict, x: str, y: str) -> str:
+        """The number of the seat whose centre is the nearest to the point."""
+        return min(plan["seats"], key=lambda seat: (float(seat["cx"]) - float(x)) ** 2
+                   + (float(seat["cy"]) - float(y)) ** 2)["number"]
+
+    def test_the_tables_of_the_data_sets_are_drawn(self):
+        for name in ("mockup16", "reserved19"):
+            pages = self.plan_pages(name)
+            with self.subTest(data=name):
+                self.assertEqual(len(pages), len([label for label, *_rest in self.pages
+                                                  if label.startswith(f"{name}: ")]))
+                for label, tree, plan, drawing in pages:
+                    # the couple label is the text of the tree, escaped
+                    self.assertIn(f'<text class="scheme__couple" x="{plan["couple"]["x"]}" '
+                                  f'y="{plan["couple"]["y"]}">'
+                                  f'{core.text_to_html(plan["couple"]["text"])}</text>', drawing)
+                    self.assertEqual(drawing.count('<g class="seat '), len(plan["seats"]))
+                    self.assertEqual("aria-hidden" in drawing, tree["isStaff"], label)
+        # no table: no drawing on any page of the data set
+        for label, _tree, document, _reads in self.pages:
+            if label.startswith("plain: "):
+                with self.subTest(page=label):
+                    self.assertNotIn("<svg", document)
+
+    def test_a_guest_with_a_companion_at_the_other_end_of_the_table(self):
+        plan, drawing = self.guest_plan("reserved19", [(1, "plusOne"), (19, "you")])
+        labels = re.findall(r'<text class="seat-label seat-label--(\w+)" x="([\d.-]+)" '
+                            r'y="([\d.-]+)">([^<]*)</text>', drawing)
+        self.assertEqual(labels, [(label["anchor"], label["x"], label["y"],
+                                   "You" if label["isYou"] else "+1")
+                                  for label in plan["labels"]])
+        self.assertEqual({text: self.nearest_seat(plan, x, y) for _anchor, x, y, text in labels},
+                         {"You": "19", "+1": "1"})
+        self.assertEqual(re.findall(r'<g class="seat seat--you seat--none">.*?>(\d+)</text></g>',
+                                    drawing), ["1", "19"])
+        self.assertIn("Your seats: 1 and 19", drawing)
+
+    def test_a_record_for_two_has_two_own_seats_and_one_label(self):
+        plan, drawing = self.guest_plan("reserved19", [(2, "you"), (3, "none")])
+        self.assertEqual(drawing.count("seat seat--you seat--none"), 2)
+        self.assertEqual(drawing.count('class="seat__ring"'), 2)
+        [(x, y, text)] = re.findall(r'<text class="seat-label[^"]*" x="([\d.-]+)" '
+                                    r'y="([\d.-]+)">([^<]*)</text>', drawing)
+        self.assertEqual((text, self.nearest_seat(plan, x, y)), ("You", "2"))
+
+    def test_a_reserved_seat_is_a_plain_seat(self):
+        menu, _guests = fixtures.reserved19()
+        for label, _tree, _plan, drawing in self.plan_pages("reserved19"):
+            for number in menu["reservedSeats"]:
+                with self.subTest(page=label, seat=number):
+                    self.assertRegex(drawing, r'<g class="seat seat--regular seat--none">'
+                                              r'<circle class="seat__circle" [^>]*/>'
+                                              r'<text class="seat__number" [^>]*>%d</text></g>'
+                                              % number)
+
+    def test_the_staff_plan_has_the_badges_in_the_order_of_the_legend(self):
+        for name in ("mockup16", "reserved19"):
+            [(label, tree, plan, drawing)] = [page for page in self.plan_pages(name)
+                                             if page[1]["isStaff"]]
+            widget = widgets_of(tree, "seating")[0]
+            order = [item["letter"] for item in widget["legend"]]
+            badges = re.findall(r'<text class="seat-badge__letter" x="([\d.-]+)" '
+                                r'y="([\d.-]+)">(\w)</text>', drawing)
+            by_seat: dict[str, list[str]] = {}
+            for x, y, letter in badges:
+                by_seat.setdefault(self.nearest_seat(plan, x, y), []).append(letter)
+            with self.subTest(data=name):
+                self.assertEqual([letter for *_xy, letter in badges],
+                                 [badge["letter"] for badge in plan["badges"]])
+                for letters in by_seat.values():
+                    self.assertEqual(letters, sorted(letters, key=order.index))
+                # a badge per dietary need of the seat, a flagged seat per seat with needs
+                needs = {str(row["number"]): len(row["tags"]) for row in widget["rows"]
+                         if row["tags"]}
+                self.assertEqual({seat: len(letters) for seat, letters in by_seat.items()}, needs)
+                flagged = re.findall(r'<g class="seat seat--\w+ seat--flagged">.*?>(\d+)</text>',
+                                     drawing)
+                self.assertEqual(sorted(flagged, key=int), sorted(needs, key=int))
+                classes = set(re.findall(r'class="([^"]*)"', drawing))
+                self.assertEqual({value for found in classes for value in found.split()}
+                                 & set(GUEST_CLASSES), set())
+
     def test_ids_headings_and_reveal_marks(self):
         for label, tree, document, _reads in self.pages:
             outline = Outline(document)

@@ -7,18 +7,24 @@ own), read by the small parser below.
 Section 1 of `assets/app.css` must equal the reference exactly; the menu adds
 only the tokens of `MENU_TOKENS`, and only in block 1a.
 
-The reference is a snapshot of the invitations' tokens; point `REFERENCE` at
-another style sheet to compare against it instead (only its `:root` rules
-are read, wherever they are).
+The reference is the style sheet of the invitations in the `site/` submodule,
+at the pinned commit: only its `:root` rules are read, comments aside.
+Without the submodule the tests fail (they are not skipped).
 """
 
 import re
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 MENU_CSS = ROOT / "assets" / "app.css"
-REFERENCE = ROOT / "tests" / "fixtures" / "invitations-tokens.css"
+REFERENCE = ROOT / "site" / "assets" / "app.css"
+REFERENCE_MISSING = (
+    "the reference site/assets/app.css is missing (the invitations builder is "
+    "not checked out in site/): run git submodule update --init --recursive"
+)
 
 #: The tokens of the menu only (block "1a. Menu tokens").
 MENU_TOKENS = frozenset({
@@ -215,9 +221,10 @@ class TokenParserTest(unittest.TestCase):
 class TokensSyncTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not REFERENCE.is_file():
+            raise AssertionError(REFERENCE_MISSING)
         cls.css = MENU_CSS.read_text(encoding="utf-8")
-        cls.reference_text = REFERENCE.read_text(encoding="utf-8")
-        cls.reference = token_contexts(cls.reference_text)
+        cls.reference = token_contexts(REFERENCE.read_text(encoding="utf-8"))
         cls.menu = token_contexts(cls.css)
         cls.sections = sections(cls.css)
 
@@ -284,12 +291,15 @@ class TokensSyncTest(unittest.TestCase):
                 with self.subTest(token=name):
                     self.assertRegex(tokens[name], r"\A(?:%s)\Z" % COLOUR_RE.pattern)
 
-    def test_the_reference_is_a_bare_snapshot(self):
-        comments = COMMENT_RE.findall(self.reference_text)
-        self.assertEqual(len(comments), 1)
-        self.assertTrue(self.reference_text.startswith(comments[0]))
-        self.assertNotIn("\n", comments[0])
-        self.assertTrue(self.reference_text.isascii())
+
+class MissingReferenceTest(unittest.TestCase):
+    def test_without_the_submodule_the_tests_fail_with_a_message(self):
+        absent = ROOT / "site" / "assets" / "absent.css"
+        with mock.patch.object(sys.modules[__name__], "REFERENCE", absent):
+            with self.assertRaises(AssertionError) as caught:
+                TokensSyncTest.setUpClass()
+        self.assertEqual(str(caught.exception), REFERENCE_MISSING)
+        self.assertIn("git submodule update --init --recursive", REFERENCE_MISSING)
 
 
 if __name__ == "__main__":

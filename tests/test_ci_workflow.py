@@ -1,4 +1,5 @@
-"""Static checks of the CI workflow text (no YAML parser required)."""
+"""Checks of the CI workflow text (no YAML parser required); the check of
+the built pages also runs on builds of the examples."""
 
 import os
 import re
@@ -23,7 +24,15 @@ MEDIA_PATTERN = r"'\.(png|jpe?g|webp|gif|avif|mp4|mov|webm|ico|svg)$'"
 HYGIENE = "Repository hygiene (no tracked media, no tracked build output)"
 NO_CYRILLIC = "No Cyrillic in tracked files"
 UNIT_TESTS = "Unit tests"
+BUILD_MAIN = "Validate and build the main example set"
+BUILD_PLAIN = "Validate and build the set without a table"
+BUILD_BASE_PATH = "Build the main example set under a base path"
+CHECK_PAGES = "Check the built pages"
+REPRODUCIBLE = "Reproducible build"
 CLEAN_TREE = "Working tree stays clean"
+
+#: The steps that build the examples and check the output, in their order.
+BUILD_STEPS = [BUILD_MAIN, BUILD_PLAIN, BUILD_BASE_PATH, CHECK_PAGES, REPRODUCIBLE]
 
 #: The steps, in their order.
 STEP_NAMES = [
@@ -32,7 +41,30 @@ STEP_NAMES = [
     HYGIENE,
     NO_CYRILLIC,
     UNIT_TESTS,
+    *BUILD_STEPS,
     CLEAN_TREE,
+]
+
+#: The commands of the build steps (comments and `set -euo pipefail` aside).
+BUILD_COMMANDS = {
+    BUILD_MAIN: [
+        "python build.py validate",
+        'python build.py build --allow-path /invite --out "$RUNNER_TEMP/dist"',
+    ],
+    BUILD_PLAIN: [
+        "python build.py validate --data examples/data-plain",
+        'python build.py build --data examples/data-plain --out "$RUNNER_TEMP/dist-plain"',
+    ],
+    BUILD_BASE_PATH: [
+        'python build.py build --base-path /menu --allow-path /invite --out "$RUNNER_TEMP/site/menu"',
+    ],
+}
+
+#: (data directory, output directory) of every build the check reads.
+CHECKED_BUILDS = [
+    ("examples/data", "$RUNNER_TEMP/dist"),
+    ("examples/data-plain", "$RUNNER_TEMP/dist-plain"),
+    ("examples/data", "$RUNNER_TEMP/site/menu"),
 ]
 
 #: A Cyrillic letter, made from its code point: this file stays free of them too.
@@ -161,6 +193,20 @@ def inline_python(block):
     return re.findall(r"(?ms)python -c '\n(.*?)^'$", script)
 
 
+def heredoc_python(block):
+    """The programs of the ``python - ... <<'PY'`` commands of a ``run: |``
+    block, dedented as YAML does, with the shell words before ``<<``."""
+    script = textwrap.dedent(block.partition("\n")[2]).replace("\\\n", " ")
+    return re.findall(r"(?ms)^python - (.*?) <<'PY'\n(.*?)^PY$", script)
+
+
+def commands(block):
+    """The command lines of a ``run: |`` block without comments and the
+    ``set -euo pipefail`` that every block starts with."""
+    lines = [line.strip() for line in textwrap.dedent(block.partition("\n")[2]).splitlines()]
+    return [line for line in lines if line and not line.startswith("#") and line != "set -euo pipefail"]
+
+
 class CiWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -272,7 +318,7 @@ class CiWorkflowTest(unittest.TestCase):
 
     def test_the_steps_and_their_order(self):
         self.assertEqual(step_names(self.raw), STEP_NAMES)
-        self.assertEqual(list(self.named), [HYGIENE, NO_CYRILLIC, UNIT_TESTS, CLEAN_TREE])
+        self.assertEqual(list(self.named), [HYGIENE, NO_CYRILLIC, UNIT_TESTS, *BUILD_STEPS, CLEAN_TREE])
         # every command is one of these (the other `run:` is the mapping of `defaults`)
         commands = [block for block in self.runs if block.startswith("|")]
         self.assertEqual(commands, list(self.named.values()))
@@ -382,6 +428,75 @@ class CiWorkflowTest(unittest.TestCase):
     def test_no_browser_or_media_tools(self):
         for name in ("chrome", "chromium", "ffmpeg", "apt-get"):
             self.assertNotIn(name, self.raw.lower())
+
+    def test_every_build_step_fails_on_the_first_error(self):
+        for name in BUILD_STEPS:
+            with self.subTest(step=name):
+                self.assertEqual(self.named[name].splitlines()[1].strip(), "set -euo pipefail")
+
+    def test_the_examples_are_validated_and_built(self):
+        for name, expected in BUILD_COMMANDS.items():
+            with self.subTest(step=name):
+                self.assertEqual(commands(self.named[name]), expected)
+        # the main set is built with the link back to the invitation allowed,
+        # once at the top of a site and once under the base path of a real site
+        builds = [line for block in self.named.values() for line in commands(block)
+                  if line.startswith("python build.py build")]
+        self.assertTrue(all("--out \"$RUNNER_TEMP/" in line for line in builds), builds)
+
+    def test_the_check_reads_every_build(self):
+        programs = heredoc_python(self.named[CHECK_PAGES])
+        self.assertEqual(len(programs), 1)
+        words, program = programs[0]
+        pairs = re.findall(r'(\S+) ("\$RUNNER_TEMP/[^"]+")', words)
+        self.assertEqual([(data, out.strip('"')) for data, out in pairs], CHECKED_BUILDS)
+        self.assertTrue(program.isascii())
+
+    def test_the_check_of_the_pages_finds_what_is_wrong(self):
+        # the builds the check reads, made here as the steps before it make them
+        from tests import support
+
+        _words, program = heredoc_python(self.named[CHECK_PAGES])[0]
+        with tempfile.TemporaryDirectory(prefix="menu-ci-test-") as temporary:
+            work = Path(temporary)
+            arguments = []
+            for data, out in CHECKED_BUILDS:
+                target = work / out.replace("$RUNNER_TEMP/", "")
+                extra = ["--base-path", "/menu"] if "/site/" in out else []
+                extra += ["--allow-path", "/invite"] if data == "examples/data" else []
+                if not target.exists():
+                    result = support.run_main("build", "--data", ROOT / data, "--out", target, *extra)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                arguments += [str(ROOT / data), str(target)]
+
+            def check():
+                return subprocess.run([sys.executable, "-", *arguments], input=program, capture_output=True,
+                                      text=True, encoding="utf-8", cwd=str(work))
+
+            passed = check()
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertEqual(len(passed.stdout.splitlines()), 3)
+            self.assertTrue(all(line.startswith("OK: ") for line in passed.stdout.splitlines()))
+            page = next((work / "dist-plain").glob("*/index.html"))
+            original = page.read_text(encoding="utf-8")
+            broken = {
+                "a style attribute": original.replace("<main ", '<main style="margin: 0" ', 1),
+                "a placeholder": original.replace("</main>", "<p>{token}</p></main>", 1),
+            }
+            for name, text in broken.items():
+                with self.subTest(case=name):
+                    page.write_text(text, encoding="utf-8")
+                    self.assertNotEqual(check().returncode, 0)
+            page.write_text(original, encoding="utf-8")
+            (work / "dist-plain" / "assets" / "extra.css").write_text("", encoding="utf-8")
+            self.assertNotEqual(check().returncode, 0)
+
+    def test_the_reproducible_build_repeats_the_first_build(self):
+        lines = commands(self.named[REPRODUCIBLE])
+        first = BUILD_COMMANDS[BUILD_MAIN][1]
+        self.assertEqual(lines[0], first.replace('"$RUNNER_TEMP/dist"', '"$RUNNER_TEMP/dist2"'))
+        self.assertIn('diff "$RUNNER_TEMP/dist.sha256" "$RUNNER_TEMP/dist2.sha256"', lines)
+        self.assertIn('test -s "$RUNNER_TEMP/dist.sha256"', lines)
 
 
 if __name__ == "__main__":

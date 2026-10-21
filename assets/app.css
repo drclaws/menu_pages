@@ -8,11 +8,11 @@
      2.  Fonts              - the system stack, no font files
      3.  Base               - reset, typography, accessibility
      4.  Layout primitives  - container, grid, vertical rhythm
-     5.  Components         - section head, prose, card, button, time label,
-                              divider, label-and-text list, note line, pills,
-                              legend, seat table, seating, text widget, dish
-                              list, drinks, staff bar and footer, set
-                              switcher, set card
+     5.  Components         - section head, prose, card, time label, divider,
+                              label-and-text list, note line, pills, legend,
+                              seat table, seating, text widget, dish list,
+                              drinks, staff bar and footer, set switcher,
+                              set card
      5a. Page               - compact cover, staff header, the audience:
                               alignment and type size
      6.  Scheme             - the table scheme
@@ -887,95 +887,6 @@ hr {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2xs);
-}
-
-/* --- Button (an <a> or a <button>) ------------------------------------------ */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2xs);
-  min-block-size: var(--tap-min);
-  min-inline-size: var(--tap-min);
-  padding: var(--btn-padding-block) var(--btn-padding-inline);
-  border: var(--line-width) solid transparent;
-  border-radius: var(--radius-pill);
-  background-color: transparent;
-  color: var(--color-text);
-  font-family: var(--font-body);
-  font-size: var(--text-base);
-  font-weight: var(--font-weight-medium);
-  line-height: var(--line-height-tight);
-  text-align: center;
-  text-decoration: none;
-  cursor: pointer;
-  transition:
-    background-color var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
-}
-
-.btn__icon {
-  inline-size: var(--icon-size);
-  block-size: var(--icon-size);
-  flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: var(--line-width);
-}
-
-.btn--primary {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-on-accent);
-  box-shadow: var(--shadow-sm);
-}
-
-.btn--secondary {
-  background-color: var(--color-bg);
-  border-color: var(--color-line-strong);
-  color: var(--color-text);
-}
-
-@media (hover: hover) {
-  .btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
-    background-color: var(--color-accent-hover);
-    border-color: var(--color-accent-hover);
-  }
-
-  .btn--secondary:hover:not(:disabled):not([aria-disabled="true"]) {
-    background-color: var(--color-surface);
-    border-color: var(--color-accent);
-    color: var(--color-accent-hover);
-  }
-}
-
-.btn--primary:active:not(:disabled):not([aria-disabled="true"]) {
-  background-color: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-  box-shadow: none;
-}
-
-.btn--secondary:active:not(:disabled):not([aria-disabled="true"]) {
-  background-color: var(--color-surface-sunken);
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover);
-}
-
-.btn:disabled,
-.btn[aria-disabled="true"] {
-  background-color: var(--color-disabled-bg);
-  border-color: var(--color-disabled-bg);
-  color: var(--color-disabled-text);
-  box-shadow: none;
-  cursor: not-allowed;
-}
-
-/* CSS blocks only the pointer: a disabled link-button is written without
-   href (role="link" aria-disabled="true"), or the keyboard still follows it. */
-a.btn[aria-disabled="true"] {
-  pointer-events: none;
 }
 
 /* --- Time label (also a seat, a course number, a kind of wine) -------------- */

@@ -77,12 +77,17 @@ DRINK_FIELDS = ("category", "name", "details", "servedWith", "staff")
 DRINK_STAFF_FIELDS = ("bottles", "serving", "swaps")
 
 SECTION_TYPES = ("cover", "custom")
+#: `nav` is the short label of a section in the line of the sections at the
+#: top of a page; a section without one has no link there.
 SECTION_FIELDS = {
     "cover": ("id", "type"),
-    "custom": ("id", "type", "visible", "audience", "title", "eyebrow", "staff", "widgets"),
+    "custom": ("id", "type", "visible", "audience", "title", "eyebrow", "nav", "staff", "widgets"),
 }
 SECTION_STAFF_FIELDS = ("title", "eyebrow")
-WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks")
+#: `heading` is the head of a part of a section: what follows it, up to the
+#: next heading, is the part (`dishes.title` is a caption of its list, not a
+#: heading).
+WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks", "heading")
 WIDGET_BASE_FIELDS = ("type", "id", "visible", "audience")
 WIDGET_FIELDS = {
     "text": ("text", "variant"),
@@ -90,9 +95,20 @@ WIDGET_FIELDS = {
     "dishes": ("items", "title"),
     "sets": ("items", "note", "staff"),
     "drinks": ("groups", "note", "staff"),
+    "heading": ("title", "eyebrow", "staff"),
 }
-#: The fields under the `staff` key of a widget: what only the staff page shows.
-WIDGET_STAFF_FIELDS = {"seating": ("footnote",), "sets": ("note",), "drinks": ("note",)}
+#: The fields under the `staff` key of a widget: what only the staff page
+#: shows (the texts of a heading replace those of the guests there).
+WIDGET_STAFF_FIELDS = {
+    "seating": ("footnote",),
+    "sets": ("note",),
+    "drinks": ("note",),
+    "heading": ("title", "eyebrow"),
+}
+#: Nothing of a section stands under such a heading on any page.
+_EMPTY_HEADING = "nothing stands under the heading"
+#: What a section without `nav` is.
+_NO_LABEL = "leave the field out for a section without a link in the line of the sections"
 TEXT_VARIANTS = ("body", "lead", "card", "signature")
 GROUP_FIELDS = ("title", "layout", "items")
 GROUP_LAYOUTS = ("list", "inline")
@@ -676,6 +692,7 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
     seating = 0
     covers: list[int] = []
     positions: dict[str, int] = {}
+    labels: dict[str, int] = {}  # a label of the line in lower case -> its section
     for position, section in enumerate(sections):
         parts = ("sections", position)
         section = check.object(section, parts)
@@ -713,6 +730,19 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
         # page ("Your seat" for a guest, "Seating and dietary notes" for the staff)
         _line(check, section, "title", parts, required=not has_seating)
         _line(check, section, "eyebrow", parts)
+        label = _line(check, section, "nav", parts)
+        if isinstance(section.get("nav"), str) and not section["nav"].strip():
+            # an empty text is "not set" elsewhere; a label is given or left out
+            check.error((*parts, "nav"), f"must not be empty: {_NO_LABEL}")
+        elif label is not MISSING:
+            key = " ".join(label.split()).lower()
+            if key in labels:
+                check.warning(
+                    (*parts, "nav"),
+                    f"repeats the label of sections[{labels[key]}] in the line of the sections (letter case aside)",
+                )
+            else:
+                labels[key] = position
         staff = _object(check, section, "staff", parts, SECTION_STAFF_FIELDS)
         if staff is not None:
             if audience == "guest":
@@ -721,15 +751,31 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
                 _line(check, staff, key, (*parts, "staff"))
         if audience == "staff":
             index.staff_parts.append(check.path(parts))
+        kinds = []
         for number, widget in enumerate(widgets):
             kind_of_widget = _check_widget(
                 check, widget, (*parts, "widgets", number), index, section_id, audience, hidden_for_staff
             )
             seating += kind_of_widget == "seating"
+            kinds.append(kind_of_widget)
+        _check_headings(check, kinds, parts)
     if seating > 1:
         check.error(("sections",), f"has {seating} seating widgets; there may be only one")
     if sections and not covers:
         check.warning(("sections",), "has no 'cover' section: the page will have no main heading")
+
+
+def _check_headings(check: _Checker, kinds: list[str | None], parts: Sequence) -> None:
+    """A heading needs something under it: a widget that is not a heading
+    before the next heading.  The pages leave such a heading out."""
+    for number, kind in enumerate(kinds):
+        if kind != "heading":
+            continue
+        where = (*parts, "widgets", number)
+        if number + 1 == len(kinds):
+            check.warning(where, f"is a heading and the last widget of the section: {_EMPTY_HEADING}")
+        elif kinds[number + 1] == "heading":
+            check.warning(where, f"is a heading followed by another heading: {_EMPTY_HEADING}")
 
 
 def _check_widget(
@@ -819,6 +865,9 @@ def _check_widget(
         _line(check, widget, "title", parts)
     elif kind == "sets":
         check.ref_list(widget, "items", parts, index.sets, "set", required=True, allow_empty=False)
+    elif kind == "heading":
+        _line(check, widget, "title", parts, required=True)
+        _line(check, widget, "eyebrow", parts)
     elif kind == "drinks":
         groups = check.value(widget, "groups", "array", parts, required=True)
         if groups is not MISSING:

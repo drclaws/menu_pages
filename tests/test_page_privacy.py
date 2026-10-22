@@ -2,7 +2,8 @@
 
 A guest page shows the shared parts of the menu and its own record, nothing
 else.  The differential test changes everything a guest must not see (the
-other records, every `staff` key, the requirements and allergens, the
+other records, every `staff` key, the texts of the headings for the staff
+among them, the requirements and allergens, the
 sections and widgets for the staff only, the dish for the staff only, the
 names and dietary notes of the seats, which seats are taken and which are
 reserved) and expects the very same tree of
@@ -92,7 +93,7 @@ def staff_only_parts(menu: dict) -> list:
 
 #: The fields of a section or a widget that hold texts (the others hold ids
 #: and choices, which a guest page may share).
-TEXT_FIELDS = ("text", "title", "eyebrow", "note", "footnote")
+TEXT_FIELDS = ("text", "title", "eyebrow", "note", "footnote", "nav")
 
 
 def texts_of(value) -> set[str]:
@@ -191,8 +192,13 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
         for widget in [part] + part.get("widgets", []):
             if widget.get("type") == "text":
                 widget["text"] = "Changed text for the staff"
-            if widget.get("type") == "dishes":
+            if widget.get("type") in ("dishes", "heading"):
                 widget["title"] = "Changed title"
+    # the texts of every heading for the staff
+    for section in menu["sections"]:
+        for widget in section.get("widgets", []):
+            if widget.get("type") == "heading":
+                widget["staff"] = {"title": "Changed heading for the staff", "eyebrow": "Changed eyebrow"}
     for section in menu["sections"]:
         if section.get("type") != "cover":
             section["widgets"].append({"type": "text", "audience": "staff", "text": "Added for the staff"})
@@ -200,6 +206,7 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
     menu["sections"].append({
         "id": "kitchen",
         "title": "Kitchen",
+        "nav": "Kitchen line",
         "audience": "staff",
         "widgets": [{"type": "text", "text": "Added staff section"}],
     })
@@ -218,7 +225,7 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
         record["seats"] = moved
         record["name"] = f"Other{len(record['token'])}"
         record["token"] = record["token"][::-1] + "-x"
-        record["sections"] = {"main": {"note": "A note of another guest"}}
+        record["sections"] = {"seats": {"note": "A note of another guest"}}
     for record in guests:
         if record.get("staff") is True:
             record["token"] = "Changed-staff-token-0123456789"
@@ -368,6 +375,18 @@ class StructureTest(unittest.TestCase):
                         if widget["type"] == "drinks":
                             self.assertEqual(widget["groups"], [])
 
+    def test_the_line_of_a_guest_has_no_label_of_a_staff_section(self):
+        menu, guests = fixtures.parts()
+        menu["sections"].insert(4, {"id": "kitchen", "title": "Kitchen", "nav": "Kitchen line", "audience": "staff",
+                                    "widgets": [{"type": "text", "text": "Plates warm by 19:00."}]})
+        trees = build(menu, guests)
+        self.assertNotIn("Kitchen line", dump(_page.public_menu(menu)))
+        for page in trees.guests:
+            with self.subTest(record=page.number):
+                self.assertEqual([item["label"] for item in page.tree["nav"]], ["Seats", "Food", "Drinks", "Info"])
+                self.assertNotIn("Kitchen line", dump(page.tree))
+        self.assertIn({"label": "Kitchen line", "target": "s-kitchen"}, trees.staff.tree["nav"])
+
     def test_the_projections_hold_no_private_key(self):
         for name, make in fixtures.SETS.items():
             with self.subTest(fixture=name):
@@ -412,7 +431,8 @@ class StructureTest(unittest.TestCase):
             ("_couple", "members"),
         }
         for function in (_page.public_menu, _page._public_widget, _page._public_dish, _page._couple,
-                         _page.own_record, _page._GuestPage):
+                         _page.own_record, _page._GuestPage, _page._parts, _page._heading, _page._set,
+                         _page._add_section):
             tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
             for node in ast.walk(tree):
                 key = None

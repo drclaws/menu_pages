@@ -147,7 +147,11 @@ jobs:
                   page = (out / token / "index.html").read_text(encoding="utf-8")
                   assert not re.search(r"(?i)\sstyle\s*=", page), f"{out}: a page has a style attribute"
                   assert "{token}" not in page, f"{out}: a page has the placeholder of a token"
-                  assert not re.search(r"(?i)<a[\s/>]", page), f"{out}: a page has a link"
+                  # a page links only to its own parts: '#' and the id of one of its elements
+                  ids = set(re.findall(r'\sid="([^"]+)"', page))
+                  for link in re.findall(r"(?i)<(?:a|area)(?=[\s/>])[^>]*>", page):
+                      target = re.search(r'\shref="#([^"]+)"', link)
+                      assert target and target.group(1) in ids, f"{out}: a link of a page leads to no part of it"
               assets = sorted(path.name for path in (out / "assets").iterdir())
               assert assets == ["app.css", "app.js", "favicon.svg"], f"{out}/assets: {assets}"
               # a token is the name of the directory of its page and nothing else

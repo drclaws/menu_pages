@@ -8,10 +8,11 @@
      2.  Fonts              - the system stack, no font files
      3.  Base               - reset, typography, accessibility
      4.  Layout primitives  - container, grid, vertical rhythm
-     5.  Components         - section head, prose, card, time label, divider,
-                              label-and-text list, note line, pills, legend,
-                              seat table, seating, text widget, dish list,
-                              drinks, staff bar and footer, set switcher,
+     5.  Components         - section head, heading of a part, prose, card,
+                              time label, divider, label-and-text list,
+                              note line, pills, legend, seat table, seating,
+                              text widget, dish list, drinks, staff bar and
+                              footer, line of the sections, set switcher,
                               set card
      5a. Page               - compact cover, staff header, the audience:
                               alignment and type size
@@ -515,6 +516,19 @@
      default font. */
   --label-padding-block: calc(var(--space-3xs) / 2);
   --number-box-width: 2.125rem;
+
+  /* The line of the sections at the top of a page: one row of links in
+     small capitals, each at least --tap-min high and wide; the row grows
+     with the text size the user chose. --section-nav-block-size is the
+     whole height of the line, the safe area of a notch above the links and
+     the hairline under them included: the target of a link stops
+     --section-nav-gap under it, so its top never hides under the line,
+     whatever the rounding of the sizes. */
+  --section-nav-padding-block: var(--space-2xs);
+  --section-nav-size: max(var(--tap-min),
+    calc(var(--text-sm) * var(--line-height-tight) + var(--section-nav-padding-block) * 2));
+  --section-nav-block-size: calc(var(--section-nav-size) + var(--safe-inset-top) + var(--line-width-hairline));
+  --section-nav-gap: 1px;
 }
 
 
@@ -543,6 +557,65 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* The line of the sections sticks to the top of the screen (section 5), and
+   a jump to a section or the keyboard focus would hide the head of its
+   target under it: the scroller of the page stops a target that far below
+   its top (on a touch screen that is the body, below). */
+html.menu {
+  scroll-padding-block-start: calc(var(--section-nav-block-size) + var(--section-nav-gap));
+}
+
+/* The canvas of a menu page has the colour of the line of the sections (and
+   of the cover): a browser shows it past the edges of the page, when the
+   page is pulled over its top or its end and in the system areas where the
+   canvas shows (WebKit takes the colour under the page from it, in the
+   browsers inside apps too). The build writes the same token into
+   <meta name="theme-color">. With a background of its own on <html> the
+   background of the body does not go to the canvas: the body paints itself
+   alone, so it is never shorter than the screen and a short page keeps the
+   background of the page under its content. color-scheme (section
+   1) does not change the canvas: its colour is set here. Print keeps the
+   document as it is. */
+@media screen {
+  html.menu {
+    background-color: var(--color-surface);
+  }
+
+  html.menu body {
+    min-block-size: var(--viewport-height-dynamic);
+  }
+}
+
+/* On a touch screen the body scrolls the page, not the document: a body
+   exactly the size of the screen. The browser of Telegram on iOS (and
+   Safari on iOS 26) puts the page under its translucent bar: the layout
+   viewport starts at the lower edge of the bar, but WebKit paints the
+   scrolled content of the document above it as well, and cuts everything
+   sticky or fixed at the layout viewport, so no fill above the line of the
+   sections (section 5) covers that strip. The content of the body is cut at
+   the edge of the body: above the screen only the canvas of <html> is left,
+   in the colour of the line (above). The line sticks to the top of the body,
+   the script (modules reveal and sectionNav) reads the scroll of the body,
+   and the stop of a target below the line (above) is set on the body too.
+   Only where the primary input is touch (pointer: coarse): the strip exists
+   on phones and tablets alone, while on a desktop the scroll of the document
+   keeps the keyboard working right after the page loads (Space, Page Down
+   and the arrows scroll the document alone, without a click first) and the
+   place on the page after a reload. Print keeps the document: screen only. */
+@media screen and (pointer: coarse) {
+  html.menu {
+    block-size: 100%;
+    overflow: hidden;
+  }
+
+  html.menu body {
+    block-size: 100%;
+    min-block-size: 0;
+    overflow-y: auto;
+    scroll-padding-block-start: calc(var(--section-nav-block-size) + var(--section-nav-gap));
+  }
 }
 
 /* iOS and iPadOS: the root font follows the system text size (Dynamic Type);
@@ -684,6 +757,16 @@ hr {
   border: none;
 }
 
+/* A link of the line of the sections glides to its section; whoever asks
+   for less motion jumps there at once (the rule below). The scroller of
+   the page is the document, or the body on a touch screen. */
+@media (prefers-reduced-motion: no-preference) {
+  html.menu,
+  html.menu body {
+    scroll-behavior: smooth;
+  }
+}
+
 /* Reduced motion: the tokens are already zeroed (section 1); this also stops
    animations set around the tokens, and smooth scrolling. */
 @media (prefers-reduced-motion: reduce) {
@@ -777,7 +860,7 @@ hr {
    5. Components
    -----------------------------------------------------------------------------
    Each component is described once. Classes are for styles only; scripts
-   hook onto data attributes (data-reveal, data-tabs).
+   hook onto data attributes (data-reveal, data-tabs, data-section-nav).
    States: hover only inside @media (hover: hover); :focus-visible is the ring
    of section 3; :active is the press; disabled is :disabled and
    [aria-disabled="true"]. Interactive elements are at least --tap-min.
@@ -828,6 +911,23 @@ hr {
 
 .section__body {
   --flow-space: var(--space-md);
+}
+
+/* --- Heading of a part: a heading widget -------------------------------------
+   The h3 of a part of a section, its eyebrow in small capitals under it, as
+   the head of the section above. A part after another one stands a larger
+   step apart, so the parts read as blocks; the first part follows the head
+   of the section at the usual step. */
+.heading-widget__title {
+  font-size: var(--text-lg);
+}
+
+.heading-widget .heading-widget__eyebrow {
+  margin-block: var(--space-2xs) 0;
+}
+
+.section__body > * + .heading-widget {
+  margin-block-start: var(--space-xl);
 }
 
 /* --- Prose ------------------------------------------------------------------ */
@@ -1313,8 +1413,12 @@ hr {
   font-weight: var(--font-weight-heading);
 }
 
-/* --- Staff bar: the top line of the staff page -------------------------------- */
+/* --- Staff bar: the top line of the staff page --------------------------------
+   It stands above the fill over the line of the sections, which reaches up
+   over the bar while the line has not stuck to the top yet. */
 .staff-bar {
+  position: relative;
+  z-index: calc(var(--z-sticky) + var(--z-raised));
   background-color: var(--color-accent);
   color: var(--color-on-accent);
 }
@@ -1356,6 +1460,116 @@ hr {
 .staff-footer__contact {
   font-weight: var(--font-weight-heading);
   color: var(--color-text);
+}
+
+/* --- Line of the sections: a link to each section of the page ----------------
+   Markup: nav.section-nav[data-section-nav] > .container >
+   ul.section-nav__list[data-section-nav-list] > li > a.section-nav__link
+   [data-section-nav-link]. One row of plain links: nothing on the page is
+   hidden, a link only leads to its section. With the script (module
+   sectionNav) the link of the section in view carries aria-current="true";
+   the styles follow the attribute.
+   On the screen the line sticks to the top and rides with the screen to the
+   end of the page; it shows at once, without a transition. Its height is a
+   token: a target stops under it (scroll-padding, section 3). When the links
+   do not fit, the list scrolls sideways by itself and the page does not
+   (its scroll bar is hidden: the list is one row of words, scrolled by touch,
+   a wheel or the focus). The focus ring is drawn inside a link, where the
+   scrolling list cannot cut it. How the links line up depends on the
+   audience (section 5a). Print leaves the line out (section 8). */
+.section-nav {
+  position: relative;
+  block-size: var(--section-nav-block-size);
+  padding-block-start: var(--safe-inset-top);
+  border-block-end: var(--line-width-hairline) solid var(--color-line);
+  background-color: var(--color-surface);
+}
+
+@media screen {
+  .section-nav {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: var(--z-sticky);
+  }
+}
+
+/* The fill above the line. Safari on iOS 26 paints the page above the
+   layout viewport too, under the transparent status bar, while the stuck
+   line stands at the top of the layout viewport, below that strip: without
+   a fill the scrolled content shows in the strip. The pseudo-element goes on
+   from the line upwards in its colour for the height of the screen, room
+   enough for any system area. It takes no room (the layout does not move)
+   and catches no tap. Where the body scrolls the page (section 3), the body
+   cuts it off with everything else above the screen. */
+.section-nav::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  block-size: var(--viewport-height);
+  background-color: inherit;
+  pointer-events: none;
+}
+
+.section-nav__inner {
+  block-size: 100%;
+}
+
+.section-nav__list {
+  display: flex;
+  block-size: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.section-nav__list::-webkit-scrollbar {
+  display: none;
+}
+
+.section-nav__item {
+  display: flex;
+  flex: none;
+}
+
+.section-nav__link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: var(--tap-min);
+  min-block-size: var(--tap-min);
+  padding-inline: var(--space-xs);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--tracking-caps);
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* The link of the section in view: the colour of the text and a stripe on
+   the hairline of the line, as the selected tab of the sets. */
+.section-nav__link[aria-current="true"] {
+  color: var(--color-text);
+  box-shadow: inset 0 calc(var(--line-width-thick) * -1) 0 var(--color-accent);
+}
+
+@media (hover: hover) {
+  .section-nav__link:hover {
+    color: var(--color-accent);
+  }
+}
+
+.section-nav__link:focus-visible {
+  outline-offset: var(--focus-ring-offset-inset);
 }
 
 /* --- Set switcher -------------------------------------------------------------
@@ -1599,10 +1813,22 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
 
 /* --- The audience ----------------------------------------------------------------
    The staff text: --text-base scaled by the ratio of its desktop and mobile
-   sizes, 17px at a 16px root. */
+   sizes, 17px at a 16px root. The links of the line of the sections stand
+   in the middle of a guest page while they fit: the free room goes to the
+   outer margins of the first and the last link, which shrink to nothing
+   when the links overflow, so the first link is never cut off on the left.
+   On the staff page they start at the left edge. */
 .menu--guest .cover,
 .menu--guest .section {
   text-align: center;
+}
+
+.menu--guest .section-nav__item:first-child {
+  margin-inline-start: auto;
+}
+
+.menu--guest .section-nav__item:last-child {
+  margin-inline-end: auto;
 }
 
 .menu--guest .card,
@@ -1820,12 +2046,20 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
    ========================================================================== */
 
 @media print {
-  /* The head of a section never stays alone at the foot of a sheet: it goes
-     to the sheet of what follows it. It never splits either, or a browser
-     would leave the eyebrow behind and carry the title alone. */
-  .section__head {
+  /* The head of a section and the heading of a part never stay alone at the
+     foot of a sheet: they go to the sheet of what follows them. They never
+     split either, or a browser would leave the eyebrow behind and carry the
+     title alone. */
+  .section__head,
+  .heading-widget {
     break-inside: avoid;
     break-after: avoid;
+  }
+
+  /* The line of the sections leads around the screen: paper has nothing to
+     lead to, every section follows the one before it. */
+  .section-nav {
+    display: none;
   }
 
   /* A shadow is a cue of depth on the screen: a browser prints the blur of
@@ -1934,6 +2168,12 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
 
   .menu--staff .section {
     margin-block: var(--space-md);
+  }
+
+  /* A part after another one: the same compact step as between the
+     sections, not the larger one of the screen. */
+  .menu--staff .section__body > * + .heading-widget {
+    margin-block-start: var(--space-md);
   }
 
   .menu--staff .page-footer {

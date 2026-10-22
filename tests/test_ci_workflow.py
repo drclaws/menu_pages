@@ -479,18 +479,40 @@ class CiWorkflowTest(unittest.TestCase):
             page = next((work / "dist-plain").glob("*/index.html"))
             token = page.parent.name
             original = page.read_text(encoding="utf-8")
+            # the pages that passed above have the links of the line of the sections
+            self.assertIn('<a class="section-nav__link" href="#s-seats"', original)
+
+            def with_body(markup):
+                return original.replace("</main>", f"{markup}</main>", 1)
+
             broken = {
                 "a style attribute": original.replace("<main ", '<main style="margin: 0" ', 1),
-                "a placeholder": original.replace("</main>", "<p>{token}</p></main>", 1),
-                "a link": original.replace("</main>", '<p><a href="/other/">Other</a></p></main>', 1),
-                "the own token": original.replace("</main>", f"<p>{token.upper()}</p></main>", 1),
+                "a placeholder": with_body("<p>{token}</p>"),
+                "a link to another page": with_body('<p><a href="/other/">Other</a></p>'),
+                "a link to an id the page does not have": with_body('<p><a href="#nowhere">Nowhere</a></p>'),
+                "an empty fragment": with_body('<p><a href="#">Top</a></p>'),
+                "a link without href": with_body("<p><a>Top</a></p>"),
+                "an area that leads elsewhere": with_body(
+                    '<map name="m"><area shape="rect" coords="0,0,1,1" href="/other/" alt=""></map>'),
+                "the own token": with_body(f"<p>{token.upper()}</p>"),
             }
             for name, text in broken.items():
                 with self.subTest(case=name):
                     page.write_text(text, encoding="utf-8")
                     failed = check()
                     self.assertNotEqual(failed.returncode, 0)
-                    self.assertNotIn(token.lower(), (failed.stdout + failed.stderr).lower())
+                    printed = (failed.stdout + failed.stderr).lower()
+                    self.assertNotIn(token.lower(), printed)
+                    for value in ("nowhere", "/other/"):
+                        self.assertNotIn(value, printed)
+            # a link to a part of the same page: the id of its cover
+            for markup in ('<p><a href="#s-cover">Top</a></p>',
+                           '<map name="m" id="m"><area shape="rect" coords="0,0,1,1" href="#m" alt=""></map>'):
+                with self.subTest(case=markup):
+                    self.assertIn(' id="s-cover"', original)
+                    page.write_text(with_body(markup), encoding="utf-8")
+                    passed = check()
+                    self.assertEqual(passed.returncode, 0, passed.stderr)
             page.write_text(original, encoding="utf-8")
             style_sheet = work / "dist-plain" / "assets" / "app.css"
             css = style_sheet.read_text(encoding="utf-8")

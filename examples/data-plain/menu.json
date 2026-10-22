@@ -89,6 +89,7 @@
     },
     {
       "id": "seats",
+      "nav": "Seats",
       "widgets": [
         {
           "type": "seating"
@@ -98,6 +99,7 @@
     {
       "id": "starters",
       "title": "To start",
+      "nav": "Starters",
       "widgets": [
         {
           "type": "dishes",
@@ -112,6 +114,7 @@
       "id": "main",
       "title": "Main course",
       "eyebrow": "Choose one of three sets",
+      "nav": "Mains",
       "widgets": [
         {
           "type": "sets",
@@ -126,6 +129,7 @@
     {
       "id": "drinks",
       "title": "Drinks",
+      "nav": "Drinks",
       "widgets": [
         {
           "type": "drinks",

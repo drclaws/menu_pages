@@ -65,6 +65,28 @@
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
+  function viewportHeight() {
+    return window.innerHeight || root.clientHeight;
+  }
+
+  /* The scroll of the page belongs to the body when the body scrolls (on a
+     touch screen, assets/app.css), otherwise to the document. */
+  function bodyScrolls() {
+    return window.getComputedStyle(document.body).overflowY !== 'visible';
+  }
+
+  function scrolled() {
+    return (bodyScrolls() ? document.body.scrollTop : window.pageYOffset) > 0;
+  }
+
+  function atEnd() {
+    var body = document.body;
+    if (bodyScrolls()) {
+      return body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
+    }
+    return viewportHeight() + window.pageYOffset >= root.scrollHeight - 2;
+  }
+
 
   /* ==========================================================================
      Module tabs - a tab switcher [data-tabs] (the sets of a menu)
@@ -235,10 +257,6 @@
     var observer = null;
     var frame = 0;
 
-    function viewportHeight() {
-      return window.innerHeight || root.clientHeight;
-    }
-
     /* The appearance is over: drop the transition, the delay and the style. */
     function settle(element) {
       if (element.classList.contains('is-settled')) {
@@ -373,17 +391,8 @@
     });
 
     /* Scroll, resize or rotation: a check that does not depend on the
-       observer, at most once a frame. Near the very end of the page a block
-       may never reach the inset, so there it is dropped. The end belongs to
-       body when body scrolls, otherwise to the document. */
-    function atEnd() {
-      var body = doc.body;
-      if (window.getComputedStyle(body).overflowY !== 'visible') {
-        return body.scrollTop + body.clientHeight >= body.scrollHeight - 2;
-      }
-      return viewportHeight() + window.pageYOffset >= root.scrollHeight - 2;
-    }
-
+       observer, at most once a frame. Near the very end of the page (atEnd)
+       a block may never reach the inset, so there it is dropped. */
     var onFrame = guarded(function () {
       frame = 0;
       sweepWithin(atEnd() ? 0 : REVEAL_INSET);
@@ -472,5 +481,195 @@
      state to the styles with is-* classes and CSS variables set through
      style.setProperty.
      ========================================================================== */
+
+
+  /* ==========================================================================
+     Module sectionNav - the line of the sections [data-section-nav]
+     --------------------------------------------------------------------------
+     Without the script the links of the line [data-section-nav-link] are
+     plain anchors and none is marked. With it the link of the section in
+     view carries aria-current="true" (the styles follow the attribute): the
+     last target whose top has reached the bottom edge of the line; at the
+     end of the page the last target whose top is on the screen, so that a
+     short last section gets its mark too; above the first target, none. The
+     targets are the elements the links name (href="#id"); a link without one
+     is left alone, and with no target at all nothing happens.
+     A click marks its link at once and holds the mark while the scroll it
+     started goes on: at the end of the page a target that never reaches the
+     line keeps its mark. The browser follows the link, smoothly or not as
+     the styles say; nothing here scrolls the page or moves the focus. Only
+     the list [data-section-nav-list] scrolls sideways to keep the marked
+     link in view, and the link the keyboard reaches (the browser leaves a
+     link that shows in part as it is, and the list would cut its focus
+     ring): scrollIntoView would stop a smooth scroll of the page in
+     Chromium.
+     Registered after tabs, which change the height of the page first. Any
+     error takes the marks away: the view without the script.
+     ========================================================================== */
+
+  var NAV_SLACK = 4;          /* px: a top this close under the line has reached it */
+  var NAV_SETTLE_MS = 150;    /* no scroll for so long: the scroll of a click is over */
+  var NAV_HOLD_MS = 1000;     /* a click that scrolls nothing lets its mark go after this */
+
+  register('sectionNav', function (doc) {
+    var nav = doc.querySelector('[data-section-nav]');
+    var list = nav ? nav.querySelector('[data-section-nav-list]') : null;
+    var links = [];
+    var targets = [];
+    Array.prototype.forEach.call(list ? list.querySelectorAll('[data-section-nav-link]') : [], function (link) {
+      var href = link.getAttribute('href') || '';
+      var target = href.charAt(0) === '#' && href.length > 1 ? doc.getElementById(href.slice(1)) : null;
+      if (target) {
+        links.push(link);
+        targets.push(target);
+      }
+    });
+    if (!targets.length) {
+      return;
+    }
+
+    var current = -1;
+    var held = false;
+    var frame = 0;
+    var timer = 0;
+
+    /* The marked link in view: the list scrolls sideways, the page stays. */
+    function keepInView(link) {
+      var box = list.getBoundingClientRect();
+      var rect = link.getBoundingClientRect();
+      if (rect.left < box.left) {
+        list.scrollLeft -= box.left - rect.left;
+      } else if (rect.right > box.right) {
+        list.scrollLeft += rect.right - box.right;
+      }
+    }
+
+    function mark(index) {
+      if (index === current) {
+        return;
+      }
+      current = index;
+      links.forEach(function (link, i) {
+        if (i === index) {
+          link.setAttribute('aria-current', 'true');
+        } else {
+          link.removeAttribute('aria-current');
+        }
+      });
+      if (index !== -1) {
+        keepInView(links[index]);
+      }
+    }
+
+    /* The index of the section in view, -1 for none. */
+    function find() {
+      var limit = scrolled() && atEnd() ? viewportHeight() :
+        nav.getBoundingClientRect().bottom + NAV_SLACK;
+      var found = -1;
+      targets.forEach(function (target, i) {
+        if (target.getBoundingClientRect().top < limit) {
+          found = i;
+        }
+      });
+      return found;
+    }
+
+    function release() {
+      held = false;
+      timer = 0;
+    }
+
+    /* The view without the script: no mark, no listener. */
+    function restore() {
+      links.forEach(function (link) {
+        link.removeAttribute('aria-current');
+      });
+      list.removeEventListener('click', onClick);
+      list.removeEventListener('focusin', onFocus);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onChange);
+      window.removeEventListener('load', onChange);
+      clearTimeout(timer);
+      if (frame && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = 0;
+      current = -1;
+      release();
+    }
+
+    function guarded(handler) {
+      return function (event) {
+        try {
+          handler(event);
+        } catch (error) {
+          restore();
+          report('sectionNav', error);
+        }
+      };
+    }
+
+    var onFrame = guarded(function () {
+      frame = 0;
+      if (!held) {
+        mark(find());
+      }
+    });
+
+    /* At most once a frame. */
+    var onChange = guarded(function () {
+      if (frame) {
+        return;
+      }
+      if (typeof window.requestAnimationFrame === 'function') {
+        frame = window.requestAnimationFrame(onFrame);
+      } else {
+        onFrame();
+      }
+    });
+
+    /* While a click holds its mark, every scroll puts off letting it go. */
+    var onScroll = guarded(function () {
+      if (held) {
+        clearTimeout(timer);
+        timer = setTimeout(release, NAV_SETTLE_MS);
+      } else {
+        onChange();
+      }
+    });
+
+    /* A plain click: a click with a modifier opens the link elsewhere. */
+    var onClick = guarded(function (event) {
+      var link = event.target && typeof event.target.closest === 'function' ?
+        event.target.closest('[data-section-nav-link]') : null;
+      var at = links.indexOf(link);
+      if (at === -1 || event.button || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      mark(at);
+      held = true;
+      clearTimeout(timer);
+      timer = setTimeout(release, NAV_HOLD_MS);
+    });
+
+    var onFocus = guarded(function (event) {
+      if (links.indexOf(event.target) !== -1) {
+        keepInView(event.target);
+      }
+    });
+
+    try {
+      list.addEventListener('click', onClick);
+      list.addEventListener('focusin', onFocus);
+      /* Capture: the scroll of the body does not bubble to window. */
+      window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+      window.addEventListener('resize', onChange);
+      window.addEventListener('load', onChange);
+      mark(find());
+    } catch (error) {
+      restore();
+      throw error;
+    }
+  });
 
 }());

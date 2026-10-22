@@ -544,7 +544,9 @@ class OptionsTest(unittest.TestCase):
 # The fields of every node
 # --------------------------------------------------------------------------
 
-ROOT_FIELDS = {"isStaff", "coupleNames", "event", "assetsPath", "faviconPath", "themeColor", "staff", "counters", "sections"}
+ROOT_FIELDS = {"isStaff", "coupleNames", "event", "assetsPath", "faviconPath", "themeColor", "staff", "counters", "nav",
+               "sections"}
+NAV_FIELDS = {"label", "target"}
 EVENT_FIELDS = {"title", "when", "place"}
 STAFF_FIELDS = {"updated", "contact", "reminder"}
 COUNTER_FIELDS = {"guests", "notes", "guestsText", "notesText", "tableLabel"}
@@ -556,12 +558,13 @@ WIDGET_FIELDS = {
     "dishes": {"title", "items"},
     "sets": {"items", "note", "count", "multiple"},
     "drinks": {"groups", "list", "note"},
+    "heading": {"titleId", "title", "eyebrow"},
 }
 MY_SEAT_FIELDS = {"number", "mark"}
 LEGEND_FIELDS = {"letter", "label"}
 ROW_FIELDS = {"number", "name", "isPlusOne", "hostName", "roleLabel", "isCouple", "isFree", "tags"}
 DISH_FIELDS = {"name", "ingredients", "allergens", "tags", "noRestrictions", "swapLines", "note"}
-SET_FIELDS = {"id", "domId", "title", "hint", "eyebrow", "courses", "pairing", "swapLines"}
+SET_FIELDS = {"id", "domId", "title", "hint", "eyebrow", "courses", "pairing", "swapLines", "nested"}
 GROUP_FIELDS = {"title", "layout", "joined", "items"}
 DRINK_FIELDS = {"category", "name", "line"}
 SCHEME_FIELDS = {"width", "height", "hidden", "tableLabel", "total", "mine", "single", "outline", "couple", "seats", "badges", "labels"}
@@ -592,6 +595,14 @@ class ContractTest(unittest.TestCase):
             self.assert_strings(item, ("id", "domId", "titleId", "title", "eyebrow", "note"), where)
             for widget in item["widgets"]:
                 self.check_widget(widget, f"{where}/{widget['domId']}")
+        # a link of the line leads to a section of the page, in their order
+        dom_ids = [item["domId"] for item in tree["sections"]]
+        for item in tree["nav"]:
+            self.assert_fields(item, NAV_FIELDS, where)
+            self.assert_strings(item, ("label", "target"), where)
+            self.assertTrue(item["label"], where)
+        targets = [item["target"] for item in tree["nav"]]
+        self.assertEqual(targets, [dom_id for dom_id in dom_ids if dom_id in targets], where)
 
     def check_widget(self, widget: dict, where: str) -> None:
         kind = widget["type"]
@@ -619,8 +630,13 @@ class ContractTest(unittest.TestCase):
             self.assertEqual(widget["multiple"], len(widget["items"]) > 1)
             for item in widget["items"]:
                 self.assert_fields(item, SET_FIELDS, where)
+                self.assertIsInstance(item["nested"], bool)
                 for course in item["courses"]:
                     self.check_dish(course, where)
+        elif kind == "heading":
+            self.assertEqual(widget["titleId"], f"{widget['domId']}--title", where)
+            self.assert_strings(widget, ("title", "eyebrow"), where)
+            self.assertTrue(widget["title"], where)
         elif kind == "drinks":
             for group in widget["groups"]:
                 self.check_group(group, where)
@@ -680,12 +696,224 @@ class ContractTest(unittest.TestCase):
         self.assertEqual((staff["groups"], staff["note"]), ([], "Refill the jugs from the bar."))
 
     def test_every_widget_type_appears_on_some_page(self):
-        trees, _report = build(*fixtures.reserved19())
+        trees, _report = build(*fixtures.parts())
         seen = set()
         for tree in [page.tree for page in trees.guests] + [trees.staff.tree]:
             seen.update(widget["type"] for item in tree["sections"] for widget in item["widgets"])
         self.assertEqual(seen, set(WIDGET_FIELDS))
         self.assertEqual(set(WIDGET_FIELDS), set(_schema.WIDGET_TYPES))
+
+
+# --------------------------------------------------------------------------
+# The line of the sections
+# --------------------------------------------------------------------------
+
+
+def nav(tree: dict) -> list[tuple[str, str]]:
+    return [(item["label"], item["target"]) for item in tree["nav"]]
+
+
+MAIN_LINE = [("Seats", "s-seats"), ("Food", "s-food"), ("Drinks", "s-drinks"), ("Info", "s-info")]
+
+
+class NavTest(unittest.TestCase):
+    def test_the_line_of_every_page(self):
+        menu, guests = fixtures.parts()
+        trees, _report = build(menu, guests)
+        for page in trees.guests + [trees.staff]:
+            with self.subTest(page=page.number):
+                self.assertEqual(nav(page.tree), MAIN_LINE)
+        # data without labels: no line
+        for name in ("mockup16", "reserved19", "plain"):
+            trees, _report = build(*fixtures.SETS[name]())
+            for page in trees.guests + [trees.staff]:
+                with self.subTest(fixture=name, page=page.number):
+                    self.assertEqual(page.tree["nav"], [])
+
+    def test_a_section_has_its_link_on_the_pages_that_show_it(self):
+        menu, guests = fixtures.parts()
+        sections = menu["sections"]
+        # the signature for the guests, a section for the staff, one hidden
+        # by default and switched on for one guest
+        sections[-1]["nav"] = "Thanks"
+        sections.insert(4, {"id": "kitchen", "title": "Kitchen", "nav": "Kitchen", "audience": "staff",
+                            "widgets": [{"type": "text", "text": "Plates warm by 19:00."}]})
+        sections.insert(5, {"id": "kids", "title": "For the children", "nav": "Kids", "visible": False,
+                            "widgets": [{"type": "text", "text": "Pasta with tomato sauce on request."}]})
+        record = next(item for item in guests if item.get("name") == "Boris")
+        record["sections"] = {"kids": {"visible": True}}
+        hidden = next(item for item in guests if item.get("name") == "Galina")
+        hidden["sections"] = {"info": {"visible": False}}
+        trees, _report = build(menu, guests)
+        self.assertEqual(nav(guest_tree(trees, guests, "Boris")),
+                         MAIN_LINE[:3] + [("Kids", "s-kids"), ("Info", "s-info"), ("Thanks", "s-signature")])
+        self.assertEqual(nav(guest_tree(trees, guests, "Galina")), MAIN_LINE[:3] + [("Thanks", "s-signature")])
+        self.assertEqual(nav(guest_tree(trees, guests, "Olga")), MAIN_LINE + [("Thanks", "s-signature")])
+        self.assertEqual(nav(trees.staff.tree),
+                         MAIN_LINE[:3] + [("Kitchen", "s-kitchen"), ("Kids", "s-kids"), ("Info", "s-info")])
+        # nobody switches the hidden section on: it is on no page, nor its link
+        record["sections"] = {}
+        trees, _report = build(menu, guests)
+        for page in trees.guests + [trees.staff]:
+            self.assertNotIn("Kids", [label for label, _target in nav(page.tree)])
+
+    def test_a_section_left_empty_on_a_page_has_no_link(self):
+        menu, guests = fixtures.parts()
+        info = menu["sections"][4]
+        info["widgets"][1]["id"] = "smoking"
+        info["widgets"][3]["id"] = "camera"
+        record = next(item for item in guests if item.get("name") == "Boris")
+        record["sections"] = {"info": {"widgets": {"smoking": {"visible": False}, "camera": {"visible": False}}}}
+        trees, _report = build(menu, guests)
+        boris = guest_tree(trees, guests, "Boris")
+        self.assertIsNone(section(boris, "info"))
+        self.assertEqual(nav(boris), MAIN_LINE[:3])
+        # the staff page keeps the section, and its link
+        self.assertEqual(nav(trees.staff.tree), MAIN_LINE)
+
+    def test_the_labels_are_shared_texts(self):
+        menu, _guests = fixtures.parts()
+        public = _page.public_menu(menu)
+        self.assertEqual([item.get("nav") for item in public["sections"]],
+                         [None, "Seats", "Food", "Drinks", "Info", ""])
+
+
+# --------------------------------------------------------------------------
+# The parts of a section under their headings
+# --------------------------------------------------------------------------
+
+
+def layout(tree: dict, section_id: str) -> list[tuple[str, str]]:
+    """(type, domId) of the widgets of a section."""
+    found = section(tree, section_id)
+    return None if found is None else [(widget["type"], widget["domId"]) for widget in found["widgets"]]
+
+
+class PartsTest(unittest.TestCase):
+    def setUp(self):
+        self.menu, self.guests = fixtures.parts()
+        self.trees, _report = build(self.menu, self.guests)
+
+    def test_the_parts_of_a_guest_page(self):
+        boris = guest_tree(self.trees, self.guests, "Boris")
+        # the dishes on request (w3) are for the staff only
+        self.assertEqual(layout(boris, "food"), [("heading", "s-food--w1"), ("dishes", "s-food--w2"),
+                                                 ("heading", "s-food--w4"), ("sets", "s-food--w5"),
+                                                 ("text", "s-food--w6")])
+        starters, _dishes, main, sets, _card = section(boris, "food")["widgets"]
+        self.assertEqual(starters, {"type": "heading", "domId": "s-food--w1", "labelledBy": "s-food--title",
+                                    "titleId": "s-food--w1--title", "title": "Starters",
+                                    "eyebrow": "Shared plates for the table"})
+        self.assertEqual((main["title"], main["eyebrow"]), ("Main course", "Choose one of two sets"))
+        # the sets stand in the second part: labelled by its heading, a level lower
+        self.assertEqual(sets["labelledBy"], "s-food--w4--title")
+        self.assertEqual([item["nested"] for item in sets["items"]], [True, True])
+        self.assertEqual(section(boris, "food")["title"], "Food")
+        # the part for the staff only is not on the page of a guest
+        self.assertEqual(layout(boris, "info"), [("heading", "s-info--w1"), ("text", "s-info--w2"),
+                                                 ("heading", "s-info--w3"), ("text", "s-info--w4")])
+        # the card hidden by the record keeps the numbers of the others
+        gleb = guest_tree(self.trees, self.guests, "Gleb")
+        self.assertEqual([dom_id for _kind, dom_id in layout(gleb, "food")],
+                         ["s-food--w1", "s-food--w2", "s-food--w4", "s-food--w5"])
+
+    def test_the_parts_of_the_staff_page(self):
+        staff = self.trees.staff.tree
+        self.assertEqual(layout(staff, "food"), [("heading", "s-food--w1"), ("dishes", "s-food--w2"),
+                                                 ("dishes", "s-food--w3"), ("heading", "s-food--w4"),
+                                                 ("sets", "s-food--w5")])
+        starters, _dishes, _on_request, main, sets = section(staff, "food")["widgets"]
+        # the eyebrows for the staff replace those of the guests, the titles stay
+        self.assertEqual((starters["title"], starters["eyebrow"]),
+                         ("Starters", "Shared plates · on the table by 19:15"))
+        self.assertEqual((main["title"], main["eyebrow"]),
+                         ("Main course", "Two sets · guests choose at the table"))
+        self.assertEqual(sets["labelledBy"], "s-food--w4--title")
+        self.assertEqual({item["nested"] for item in sets["items"]}, {True})
+        self.assertEqual([widget["title"] for widget in section(staff, "info")["widgets"]
+                          if widget["type"] == "heading"], ["Smoking", "Instant camera", "Clearing up"])
+        # a title for the staff replaces the title of the guests there alone
+        menu, guests = fixtures.parts()
+        menu["sections"][2]["widgets"][0]["staff"]["title"] = "Starters at 19:15"
+        trees, _report = build(menu, guests)
+        self.assertEqual(section(trees.staff.tree, "food")["widgets"][0]["title"], "Starters at 19:15")
+        for page in trees.guests:
+            self.assertEqual(section(page.tree, "food")["widgets"][0]["title"], "Starters")
+
+    def test_a_heading_with_nothing_under_it_on_a_page_is_left_out(self):
+        menu, guests = fixtures.parts()
+        food = menu["sections"][2]["widgets"]
+        # over the dishes for the staff only: nothing under it for a guest
+        food.insert(2, {"type": "heading", "title": "On request"})
+        trees, report = build(menu, guests)
+        self.assertEqual(report.warnings, [])
+        boris = guest_tree(trees, guests, "Boris")
+        self.assertEqual([dom_id for kind, dom_id in layout(boris, "food") if kind == "heading"],
+                         ["s-food--w1", "s-food--w5"])
+        self.assertEqual([dom_id for kind, dom_id in layout(trees.staff.tree, "food") if kind == "heading"],
+                         ["s-food--w1", "s-food--w3", "s-food--w5"])
+        # at the end of a section and before another heading: on no page
+        menu, guests = fixtures.parts()
+        info = menu["sections"][4]["widgets"]
+        del info[1]
+        info.append({"type": "heading", "title": "Taxis"})
+        trees, _report = build(menu, guests)
+        for tree in [page.tree for page in trees.guests] + [trees.staff.tree]:
+            titles = [widget["title"] for widget in section(tree, "info")["widgets"] if widget["type"] == "heading"]
+            self.assertNotIn("Smoking", titles)
+            self.assertNotIn("Taxis", titles)
+
+    def test_a_section_of_headings_alone_is_empty(self):
+        menu, guests = fixtures.parts()
+        menu["sections"].insert(4, {
+            "id": "sweets",
+            "title": "Sweets",
+            "widgets": [{"type": "heading", "title": "Dessert"}, {"type": "text", "id": "cake", "text": "Cake at ten."}],
+        })
+        record = next(item for item in guests if item.get("name") == "Boris")
+        record["sections"] = {"sweets": {"widgets": {"cake": {"visible": False}}}}
+        trees, _report = build(menu, guests)
+        self.assertIsNone(section(guest_tree(trees, guests, "Boris"), "sweets"))
+        self.assertEqual(layout(guest_tree(trees, guests, "Galina"), "sweets"),
+                         [("heading", "s-sweets--w1"), ("text", "s-sweets--w2")])
+        # with a note of the guest the section stays, the note alone
+        record["sections"]["sweets"]["note"] = "We kept a slice for you."
+        trees, _report = build(menu, guests)
+        sweets = section(guest_tree(trees, guests, "Boris"), "sweets")
+        self.assertEqual((sweets["widgets"], sweets["note"]), ([], "We kept a slice for you."))
+
+    def test_a_heading_for_the_staff_only(self):
+        menu, guests = fixtures.reserved19()
+        menu["sections"][3]["widgets"].insert(0, {"type": "heading", "audience": "staff", "title": "Kitchen"})
+        trees, _report = build(menu, guests)
+        (guest_sets,) = widgets(guest_tree(trees, guests, "Boris"), "sets")
+        self.assertEqual((guest_sets["domId"], guest_sets["labelledBy"]), ("s-main--w2", "s-main--title"))
+        self.assertEqual({item["nested"] for item in guest_sets["items"]}, {False})
+        self.assertEqual(widgets(guest_tree(trees, guests, "Boris"), "heading"), [])
+        (staff_sets,) = widgets(trees.staff.tree, "sets")
+        self.assertEqual(staff_sets["labelledBy"], "s-main--w1--title")
+        self.assertEqual({item["nested"] for item in staff_sets["items"]}, {True})
+
+    def test_a_heading_a_guest_switches_off(self):
+        menu, guests = fixtures.reserved19()
+        menu["sections"][3]["widgets"].insert(0, {"type": "heading", "id": "choice", "title": "Main course"})
+        record = next(item for item in guests if item.get("name") == "Boris")
+        record["sections"] = {"main": {"widgets": {"choice": {"visible": False}}}}
+        trees, _report = build(menu, guests)
+        (boris_sets,) = widgets(guest_tree(trees, guests, "Boris"), "sets")
+        self.assertEqual((boris_sets["labelledBy"], boris_sets["items"][0]["nested"]), ("s-main--title", False))
+        (galina_sets,) = widgets(guest_tree(trees, guests, "Galina"), "sets")
+        self.assertEqual((galina_sets["labelledBy"], galina_sets["items"][0]["nested"]), ("s-main--w1--title", True))
+
+    def test_the_guest_projection_of_a_heading(self):
+        public = _page.public_menu(fixtures.parts()[0])
+        food = next(item for item in public["sections"] if item["id"] == "food")
+        self.assertEqual(food["widgets"][0], {"type": "heading", "id": None, "visible": True, "title": "Starters",
+                                              "eyebrow": "Shared plates for the table"})
+        info = next(item for item in public["sections"] if item["id"] == "info")
+        # the part for the staff only keeps its places as None
+        self.assertEqual([widget and widget["type"] for widget in info["widgets"]],
+                         ["heading", "text", "heading", "text", None, None])
 
 
 if __name__ == "__main__":

@@ -16,6 +16,11 @@ Each function returns a fresh `(menu, guests)` pair that a test may change.
   section, a hidden widget and the staff record.
 * `plain` - no table, no dietary notes, no allergens; three sets, one
   category of drinks, three records (one with a +1) and the staff record.
+* `parts` - `reserved19` with the starters and the main course in one
+  section of two parts under their headings (the staff page has eyebrows of
+  its own) and a section of short texts under headings after the drinks,
+  its last part for the staff only; the seats, the food, the drinks and the
+  texts have their labels in the line of the sections, the signature none.
 
 The dietary notes name what to leave out ("no nuts"), never a reason.
 """
@@ -629,8 +634,51 @@ def plain() -> tuple[dict, list]:
     return copy.deepcopy(_PLAIN_MENU), copy.deepcopy(_PLAIN_GUESTS)
 
 
+# --------------------------------------------------------------------------
+# parts
+# --------------------------------------------------------------------------
+
+#: The texts of the section after the drinks: (heading, text, audience).
+INFO = (
+    ("Smoking", "Smoking is fine on the terrace by the river.", "all"),
+    ("Instant camera", "An instant camera waits at the bar: take a picture and leave it for the couple.", "all"),
+    ("Clearing up", "Bring the camera back to the bar at the end of the evening.", "staff"),
+)
+
+
+def parts() -> tuple[dict, list]:
+    """`reserved19` with a section of parts for the food and one of texts."""
+    menu, guests = reserved19()
+    sections = menu["sections"]
+    starters, main = sections[2], sections[3]
+    food = {
+        "id": "food",
+        "title": "Food",
+        "nav": "Food",
+        "widgets": [
+            {"type": "heading", "title": "Starters", "eyebrow": starters["eyebrow"], "staff": starters["staff"]},
+            *starters["widgets"],
+            {"type": "heading", "title": "Main course", "eyebrow": main["eyebrow"], "staff": main["staff"]},
+            *main["widgets"],
+        ],
+    }
+    info = {"id": "info", "title": "Good to know", "nav": "Info", "widgets": []}
+    for title, text, audience in INFO:
+        extra = {} if audience == "all" else {"audience": audience}
+        info["widgets"] += [{"type": "heading", "title": title, **extra}, {"type": "text", "text": text, **extra}]
+    sections[2:4] = [food]
+    sections.insert(len(sections) - 1, info)
+    sections[1]["nav"] = "Seats"
+    sections[3]["nav"] = "Drinks"
+    for record in guests:
+        overrides = record.get("sections") or {}
+        if "main" in overrides:
+            overrides["food"] = overrides.pop("main")
+    return menu, guests
+
+
 #: Every set by name.
-SETS = {"mockup16": mockup16, "reserved19": reserved19, "plain": plain}
+SETS = {"mockup16": mockup16, "reserved19": reserved19, "plain": plain, "parts": parts}
 
 
 def names(guests: list, menu: dict | None = None) -> set[str]:

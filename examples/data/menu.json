@@ -306,6 +306,7 @@
     },
     {
       "id": "seats",
+      "nav": "Seats",
       "widgets": [
         {
           "type": "seating",
@@ -316,13 +317,18 @@
       ]
     },
     {
-      "id": "starters",
-      "title": "Starters",
-      "eyebrow": "Shared plates for the table",
-      "staff": {
-        "eyebrow": "Shared plates · on the table by 19:15"
-      },
+      "id": "food",
+      "title": "Food",
+      "nav": "Food",
       "widgets": [
+        {
+          "type": "heading",
+          "title": "Starters",
+          "eyebrow": "Shared plates for the table",
+          "staff": {
+            "eyebrow": "Shared plates · on the table by 19:15"
+          }
+        },
         {
           "type": "dishes",
           "items": [
@@ -338,17 +344,15 @@
           "items": [
             "melon"
           ]
-        }
-      ]
-    },
-    {
-      "id": "main",
-      "title": "Main course",
-      "eyebrow": "Choose one of two sets",
-      "staff": {
-        "eyebrow": "Two sets · guests choose at the table"
-      },
-      "widgets": [
+        },
+        {
+          "type": "heading",
+          "title": "Main course",
+          "eyebrow": "Choose one of two sets",
+          "staff": {
+            "eyebrow": "Two sets · guests choose at the table"
+          }
+        },
         {
           "type": "sets",
           "items": [
@@ -372,6 +376,7 @@
     {
       "id": "drinks",
       "title": "Drinks",
+      "nav": "Drinks",
       "staff": {
         "eyebrow": "What to serve and when"
       },
@@ -419,6 +424,29 @@
           "staff": {
             "note": "The bar mixes cocktails on request."
           }
+        }
+      ]
+    },
+    {
+      "id": "info",
+      "title": "Good to know",
+      "nav": "Info",
+      "widgets": [
+        {
+          "type": "heading",
+          "title": "Smoking"
+        },
+        {
+          "type": "text",
+          "text": "Smoking is fine on the terrace by the river."
+        },
+        {
+          "type": "heading",
+          "title": "Instant camera"
+        },
+        {
+          "type": "text",
+          "text": "An instant camera waits at the bar: take a picture and leave it for the couple."
         }
       ]
     },

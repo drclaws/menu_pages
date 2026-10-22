@@ -132,7 +132,7 @@ def _(menu, guests):
     "unknown_widget_type",
     errors=[
         M + "field 'sections[2].widgets[0].type' names an unknown widget type 'dish' (did you mean 'dishes'?); "
-        "known: text, seating, dishes, sets, drinks"
+        "known: text, seating, dishes, sets, drinks, heading"
     ],
 )
 def _(menu, guests):
@@ -143,7 +143,7 @@ def _(menu, guests):
     "link_is_no_widget_type",
     errors=[
         M + "field 'sections[5].widgets[1].type' names an unknown widget type 'link' (did you mean 'drinks'?); "
-        "known: text, seating, dishes, sets, drinks"
+        "known: text, seating, dishes, sets, drinks, heading"
     ],
 )
 def _(menu, guests):
@@ -349,6 +349,115 @@ def _(menu, guests):
 def _(menu, guests):
     menu["sections"][3]["widgets"][0]["items"] = ["fish"]
     menu["sets"]["fish"]["courses"] += ["carpaccio", "duck"]
+
+
+# --------------------------------------------------------------------------
+# Headings of the parts of a section (the base `parts`: sections[2] is the
+# food in two parts, sections[4] the texts under headings, its last part for
+# the staff only)
+# --------------------------------------------------------------------------
+
+
+def food(menu: dict) -> list:
+    return menu["sections"][2]["widgets"]
+
+
+def info(menu: dict) -> list:
+    return menu["sections"][4]["widgets"]
+
+
+@case("heading_without_a_title", base="parts", errors=[M + "field 'sections[2].widgets[0].title' is required"])
+def _(menu, guests):
+    del food(menu)[0]["title"]
+
+
+@case("heading_with_an_empty_title", base="parts",
+      errors=[M + "field 'sections[2].widgets[0].title' must not be empty"])
+def _(menu, guests):
+    food(menu)[0]["title"] = " "
+
+
+@case("heading_title_on_two_lines", base="parts",
+      errors=[M + "field 'sections[2].widgets[3].title' must be a single line (no line breaks)"])
+def _(menu, guests):
+    food(menu)[3]["title"] = "Main\ncourse"
+
+
+@case("heading_with_an_unknown_field", base="parts",
+      errors=[M + "unknown field 'sections[2].widgets[0].subtitle' (did you mean 'title'?)"])
+def _(menu, guests):
+    food(menu)[0]["subtitle"] = "Shared plates"
+
+
+@case("staff_texts_of_a_heading_with_an_unknown_field", base="parts",
+      errors=[M + "unknown field 'sections[2].widgets[0].staff.note'"])
+def _(menu, guests):
+    food(menu)[0]["staff"]["note"] = "On the table by 19:15"
+
+
+@case("token_in_a_heading", base="parts",
+      errors=[M + "field 'sections[4].widgets[0].title' must not contain '{token}': the pages of the menu hold no token"])
+def _(menu, guests):
+    info(menu)[0]["title"] = "Smoking {token}"
+
+
+@case("staff_texts_of_a_heading_for_the_guests", base="parts",
+      warnings=[M + "field 'sections[2].widgets[0].staff' has no effect: the widget is for the guests only"])
+def _(menu, guests):
+    food(menu)[0]["audience"] = "guest"
+
+
+@case("heading_at_the_end_of_a_section", base="parts", warnings=[
+    M + "field 'sections[4].widgets[4]' is a heading and the last widget of the section: nothing stands under the heading"])
+def _(menu, guests):
+    info(menu).pop()
+
+
+@case("two_headings_in_a_row", base="parts", warnings=[
+    M + "field 'sections[4].widgets[0]' is a heading followed by another heading: nothing stands under the heading"])
+def _(menu, guests):
+    del info(menu)[1]
+
+
+# --------------------------------------------------------------------------
+# The labels of the line of the sections
+# --------------------------------------------------------------------------
+
+
+@case("label_of_the_cover", base="parts", errors=[M + "unknown field 'sections[0].nav'"])
+def _(menu, guests):
+    menu["sections"][0]["nav"] = "Top"
+
+
+@case("empty_label", base="parts", errors=[
+    M + "field 'sections[2].nav' must not be empty: leave the field out for a section without a link in the "
+    "line of the sections"])
+def _(menu, guests):
+    menu["sections"][2]["nav"] = " "
+
+
+@case("label_on_two_lines", base="parts",
+      errors=[M + "field 'sections[2].nav' must be a single line (no line breaks)"])
+def _(menu, guests):
+    menu["sections"][2]["nav"] = "Food\nand wine"
+
+
+@case("label_that_is_no_text", base="parts", errors=[M + "field 'sections[3].nav' must be a string, got a boolean"])
+def _(menu, guests):
+    menu["sections"][3]["nav"] = True
+
+
+@case("label_repeated", base="parts", warnings=[
+    M + "field 'sections[4].nav' repeats the label of sections[2] in the line of the sections (letter case aside)"])
+def _(menu, guests):
+    menu["sections"][4]["nav"] = " FOOD"
+
+
+@case("misspelt_heading_type", base="parts", errors=[
+    M + "field 'sections[2].widgets[3].type' names an unknown widget type 'headng' (did you mean 'heading'?); "
+    "known: text, seating, dishes, sets, drinks, heading"])
+def _(menu, guests):
+    food(menu)[3]["type"] = "headng"
 
 
 # --------------------------------------------------------------------------
@@ -644,7 +753,7 @@ FREE_SEATS_12_13 = (
 
 class FixturesTest(unittest.TestCase):
     def test_fixtures_pass(self):
-        expected = {"mockup16": [FREE_SEATS_12_13], "reserved19": [], "plain": []}
+        expected = {"mockup16": [FREE_SEATS_12_13], "reserved19": [], "plain": [], "parts": []}
         for name, make in fixtures.SETS.items():
             with self.subTest(fixture=name):
                 index, errors, warnings = check(*make())
@@ -722,6 +831,19 @@ class FixturesTest(unittest.TestCase):
         menu, guests = fixtures.reserved19()
         del guests[12]["token"]
         self.assertEqual(check(menu, guests)[1:], ([G(13) + "field 'token' is required"], []))
+
+    def test_labels_of_the_line_on_any_section_but_the_cover(self):
+        # a section for the staff or for the guests only may have a label:
+        # the page that shows it links it
+        menu, guests = fixtures.parts()
+        menu["sections"].insert(4, {**kitchen_section(), "nav": "Kitchen"})
+        menu["sections"][-1]["nav"] = "Thanks"
+        self.assertEqual(full_check(menu, guests), ([], []))
+        # the same label once in a lower and once in an upper case: one warning
+        menu["sections"][-1]["nav"] = "kitchen"
+        self.assertEqual(full_check(menu, guests), ([], [
+            M + "field 'sections[6].nav' repeats the label of sections[4] in the line of the sections "
+            "(letter case aside)"]))
 
 
 # --------------------------------------------------------------------------

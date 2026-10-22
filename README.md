@@ -34,6 +34,8 @@ menu_tools/            the package of the builder
   _output.py           the checks of the finished output
 template.html          the page template
 fragments/             the fragments of the sections, the widgets and their parts
+  partials/section-nav.html   the line of the sections at the top of a page
+  widgets/heading.html        the heading of a part of a section
 assets/                the style sheet and the script of the pages
 examples/data/         fictional data: an L-shaped table of 19 seats, dietary notes, a staff page
 examples/data-plain/   fictional data without a table and dietary notes
@@ -41,6 +43,68 @@ site/                  submodule: the code of the invitations builder, pinned to
 tests/                 unit tests (unittest, standard library only)
 .github/workflows/     unit tests, repository hygiene, builds of the examples and their checks
 LICENSE                the MIT license
+```
+
+## Sections and navigation
+
+`sections` of `menu.json` are the sections of a page in their order: the
+cover (`"type": "cover"`, first) and sections of widgets. A widget is a text,
+the seating, a list of dishes, the set switcher, the drinks or a heading.
+`audience` (`all`, `guest` or `staff`) and `visible` choose the pages a
+section or a widget is on; a guest record can switch them for its own page.
+
+- `nav` of a section is the short label of its link in the line of the
+  sections at the top of the page: one line of text, not empty. A section
+  without it (the closing signature, say) has no link there, and a page links
+  only the sections it shows. The cover has no label; two sections with the
+  same label (letter case aside) get a warning.
+- A widget of the type `heading` heads a part of its section: `title` (an
+  h3), `eyebrow` in small capitals under it, and `staff: { title, eyebrow }`
+  for the staff page. The widgets after it, up to the next heading, are its
+  part; a set card in a part is an h4. A heading with nothing under it on a
+  page is left out of that page, and `validate` warns about a heading at the
+  end of a section or right before another one. `title` of a list of dishes
+  stays a caption in small capitals, not a heading.
+
+The line is a row of plain links to the sections of the page: nothing is
+hidden, and without JavaScript a link jumps to its section. With it, the link
+of the section in view is marked (`aria-current`), and a click keeps the mark
+of its link while the page scrolls there. On the screen the line sticks to
+the top, a section reached by a link stops under it, the scroll glides unless
+the reader asks for less motion, and a line too long for the screen scrolls
+sideways by itself; on a touch screen the body scrolls the page. Print leaves
+the line out.
+
+A page links only to its own parts: every `<a>` and `<area>` of the output has
+an `href` of the form `#<id>`, the id of an element of the same page. The
+build and CI refuse any other link, and no file of the output holds a token.
+
+The food of `examples/data`, one section of two parts (a few fields left out):
+
+```json
+{
+  "id": "food",
+  "title": "Food",
+  "nav": "Food",
+  "widgets": [
+    {
+      "type": "heading",
+      "title": "Starters",
+      "eyebrow": "Shared plates for the table",
+      "staff": { "eyebrow": "Shared plates · on the table by 19:15" }
+    },
+    { "type": "dishes", "items": ["bruschetta", "cheese-board", "hummus"] },
+    { "type": "dishes", "audience": "staff", "title": "On request", "items": ["melon"] },
+    {
+      "type": "heading",
+      "title": "Main course",
+      "eyebrow": "Choose one of two sets",
+      "staff": { "eyebrow": "Two sets · guests choose at the table" }
+    },
+    { "type": "sets", "items": ["fish", "meat"] },
+    { "type": "text", "id": "allergy-card", "audience": "guest", "variant": "card", "text": "…" }
+  ]
+}
 ```
 
 ## Commands

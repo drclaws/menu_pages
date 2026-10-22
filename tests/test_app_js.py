@@ -10,7 +10,16 @@ APP_JS = ROOT / "assets" / "app.js"
 APP_CSS = ROOT / "assets" / "app.css"
 
 #: Every module of the script, in the order they are registered.
-MODULES = ["tabs", "reveal"]
+MODULES = ["tabs", "reveal", "sectionNav"]
+
+
+def module_code(code, name):
+    """The code of a module (comments dropped): from the first declaration
+    after its header comment up to the header of the next module."""
+    starts = {"tabs": "var TABS_STEPS", "reveal": "var REVEAL_INSET", "sectionNav": "var NAV_SLACK"}
+    start = code.index(starts[name])
+    following = [code.index(mark) for mark in starts.values() if code.index(mark) > start]
+    return code[start:min(following)] if following else code[start:code.rindex("}());")]
 
 
 def strip_comments(source):
@@ -94,7 +103,11 @@ class AppJsSourceTest(unittest.TestCase):
         for selector in selectors:
             with self.subTest(selector=selector):
                 self.assertRegex(selector, r"^'\[data-[a-z-]+\]'$")
-        self.assertNotRegex(self.code, r"getElementsByClassName|getElementById|getElementsByTagName")
+        self.assertNotRegex(self.code, r"getElementsByClassName|getElementsByTagName")
+        # an element by its id only where the id comes from the markup: the
+        # fragment of a link of the line of the sections
+        self.assertEqual(self.code.count("getElementById("), 1)
+        self.assertIn("doc.getElementById(href.slice(1))", module_code(self.code, "sectionNav"))
 
     def test_es2017_compatible_syntax(self):
         for pattern in (r"\?\.", r"\?\?", r"\bawait\b.*\bfor\b", r"#\w+\s*[=(;]",
@@ -105,10 +118,11 @@ class AppJsSourceTest(unittest.TestCase):
 
     def test_size_stays_small(self):
         # Our own code, not a library: without comments the file is about
-        # 10.5 KB (the reveal a little over half of it, the tabs about a
-        # third); about 5 KB gzipped with comments. Raise the limits
-        # deliberately, when a module needs it, not to make room in advance.
-        self.assertLess(len(self.code.encode("utf-8")), 12 * 1024)
+        # 15 KB (the reveal over a third of it, the line of the sections and
+        # the tabs about a quarter each); about 6.3 KB gzipped with comments.
+        # Raise the limits deliberately, when a module needs it, not to make
+        # room in advance.
+        self.assertLess(len(self.code.encode("utf-8")), 16 * 1024)
         self.assertLess(len(gzip.compress(self.raw.encode("utf-8"), 9)), 8 * 1024)
 
     def test_the_script_has_no_text_of_its_own(self):
@@ -120,7 +134,7 @@ class AppJsSourceTest(unittest.TestCase):
         self.assertNotRegex(self.code, r"setAttribute\('(?:aria-label|aria-description|title|alt|placeholder)'")
         # the attributes the script writes carry states and links, never words
         written = set(re.findall(r"setAttribute\('([\w-]+)'", self.code))
-        self.assertEqual(written, {"aria-selected", "role", "tabindex", "aria-labelledby"})
+        self.assertEqual(written, {"aria-selected", "role", "tabindex", "aria-labelledby", "aria-current"})
 
     def test_viewport_changes_reach_the_reveal_without_the_observer(self):
         for event in ("resize", "orientationchange"):
@@ -322,7 +336,8 @@ class RevealInvariantsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         code = strip_comments(APP_JS.read_text(encoding="utf-8"))
-        cls.module = code[code.index("register('reveal'"):]
+        module = module_code(code, "reveal")
+        cls.module = module[module.index("register('reveal'"):]
         cls.code = code
         cls.css = APP_CSS.read_text(encoding="utf-8")
 
@@ -372,6 +387,93 @@ class RevealInvariantsTest(unittest.TestCase):
         stagger_max = int(re.search(r"REVEAL_STAGGER_MAX = (\d+)", self.code).group(1))
         longest = css_ms(self.css, "--duration-slow") + stagger_max * css_ms(self.css, "--reveal-stagger")
         self.assertGreater(settle, longest + 200)
+
+
+class SectionNavSourceTest(unittest.TestCase):
+    """The module of the line of the sections: it marks, it never hides or scrolls the page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.code = strip_comments(APP_JS.read_text(encoding="utf-8"))
+        cls.module = module_code(cls.code, "sectionNav")
+
+    def test_registered_after_the_tabs(self):
+        # the tabs change the height of the page before the targets are measured
+        self.assertLess(self.code.index("register('tabs'"), self.code.index("register('sectionNav'"))
+
+    def test_hooks_are_its_data_attributes_alone(self):
+        hooks = sorted(set(re.findall(r"'\[(data-[a-z-]+)\]'", self.module)))
+        self.assertEqual(hooks, ["data-section-nav", "data-section-nav-link", "data-section-nav-list"])
+        # nothing to do without the line or without a target
+        init = self.module[self.module.index("register('sectionNav'"):]
+        self.assertRegex(init, r"if \(!targets\.length\) \{\s*return;\s*\}")
+        self.assertLess(init.index("if (!targets.length)"), init.index("addEventListener"))
+
+    def test_the_mark_is_aria_current(self):
+        self.assertIn("link.setAttribute('aria-current', 'true');", self.module)
+        self.assertIn("link.removeAttribute('aria-current');", self.module)
+        self.assertEqual(set(re.findall(r"setAttribute\('([\w-]+)'", self.module)), {"aria-current"})
+        self.assertNotRegex(self.module, r"\.hidden\b|classList|\.style\.")
+
+    def test_handlers_are_guarded_and_restore_the_view_without_the_script(self):
+        listeners = re.findall(r"\.addEventListener\('([a-z]+)', (\w+)", self.module)
+        self.assertEqual(sorted(listeners), [("click", "onClick"), ("focusin", "onFocus"), ("load", "onChange"),
+                                             ("resize", "onChange"), ("scroll", "onScroll")])
+        for name in {listener for _event, listener in listeners} | {"onFrame"}:
+            with self.subTest(handler=name):
+                self.assertRegex(self.module, r"var %s = guarded\(function" % name)
+        guarded = self.module[self.module.index("function guarded("):]
+        self.assertRegex(guarded, r"catch \(error\) \{\s*restore\(\);\s*report\('sectionNav', error\);")
+        restore = self.module[self.module.index("function restore("):self.module.index("function guarded(")]
+        self.assertIn("link.removeAttribute('aria-current');", restore)
+        for event, listener in listeners:
+            removed = "true" if event == "scroll" else listener
+            with self.subTest(listener=event):
+                self.assertRegex(restore, r"\.removeEventListener\('%s', %s(?:, %s)?\);" % (event, listener, removed))
+        self.assertIn("clearTimeout(timer);", restore)
+        # a failure while starting goes back to the view without the script as well
+        self.assertRegex(self.module, r"\} catch \(error\) \{\s*restore\(\);\s*throw error;\s*\}\s*\}\);\s*$")
+
+    def test_scroll_is_caught_in_the_capture_phase_once_a_frame(self):
+        # the body scrolls the page on a touch screen: its scroll does not reach window otherwise
+        self.assertIn("window.addEventListener('scroll', onScroll, { passive: true, capture: true });",
+                      self.module)
+        self.assertIn("window.removeEventListener('scroll', onScroll, true);", self.module)
+        self.assertIn("requestAnimationFrame(onFrame)", self.module)
+        self.assertRegex(self.module, r"var onChange = guarded\(function \(\) \{\s*if \(frame\) \{\s*return;")
+
+    def test_the_page_is_scrolled_by_the_browser_alone(self):
+        # scrollIntoView stops a smooth scroll of the page in Chromium; the
+        # focus stays where the browser puts it; the link is followed as it is
+        for pattern in (r"scrollIntoView", r"\.focus\(", r"preventDefault", r"\bscrollTo\b", r"\bscrollBy\b",
+                        r"scrollTop\s*[-+]?=[^=]", r"window\.scroll\("):
+            with self.subTest(pattern=pattern):
+                self.assertNotRegex(self.module, pattern)
+        # only the list scrolls sideways
+        self.assertEqual(set(re.findall(r"(\w+)\.scrollLeft\s*[-+]?=[^=]", self.module)), {"list"})
+
+    def test_a_click_holds_its_mark_while_its_scroll_goes_on(self):
+        constants = dict(re.findall(r"var (NAV_[A-Z_]+) = (\d+);", self.module))
+        self.assertEqual(set(constants), {"NAV_SLACK", "NAV_SETTLE_MS", "NAV_HOLD_MS"})
+        self.assertLess(int(constants["NAV_SETTLE_MS"]), int(constants["NAV_HOLD_MS"]))
+        click = self.module[self.module.index("var onClick"):]
+        self.assertIn("held = true;", click)
+        self.assertIn("timer = setTimeout(release, NAV_HOLD_MS);", click)
+        scroll = self.module[self.module.index("var onScroll"):self.module.index("var onClick")]
+        self.assertIn("timer = setTimeout(release, NAV_SETTLE_MS);", scroll)
+        frame = self.module[self.module.index("var onFrame"):self.module.index("var onChange")]
+        self.assertRegex(frame, r"if \(!held\) \{\s*mark\(find\(\)\);")
+
+    def test_the_section_in_view(self):
+        find = self.module[self.module.index("function find()"):self.module.index("function release()")]
+        # the bottom edge of the line, with a slack; at the end of the page the screen
+        self.assertIn("scrolled() && atEnd() ? viewportHeight() :", find)
+        self.assertIn("nav.getBoundingClientRect().bottom + NAV_SLACK", find)
+        self.assertIn("target.getBoundingClientRect().top < limit", find)
+        # the end and the scroll belong to the body when the body scrolls
+        helpers = self.code[self.code.index("function bodyScrolls()"):self.code.index("var TABS_STEPS")]
+        self.assertIn("window.getComputedStyle(document.body).overflowY !== 'visible'", helpers)
+        self.assertIn("body.scrollTop + body.clientHeight >= body.scrollHeight - 2", helpers)
 
 
 if __name__ == "__main__":

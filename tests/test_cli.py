@@ -34,6 +34,7 @@ SUMMARIES = {
     "mockup16": "validate: OK - 16 seat(s), 10 guest record(s) + staff, 9 dish(es), 2 set(s), 4 drink(s)\n",
     "reserved19": "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n",
     "plain": "validate: OK - 4 seat(s), 3 guest record(s) + staff, 6 dish(es), 3 set(s), 2 drink(s)\n",
+    "parts": "validate: OK - 19 seat(s), 12 guest record(s) + staff, 8 dish(es), 2 set(s), 5 drink(s)\n",
 }
 WARNINGS = {
     "mockup16": (
@@ -42,6 +43,7 @@ WARNINGS = {
     ),
     "reserved19": "",
     "plain": "",
+    "parts": "",
 }
 
 

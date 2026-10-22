@@ -180,8 +180,8 @@ class StyleSheetTest(unittest.TestCase):
         self.assertEqual(rules(self.section_code("3"))["[hidden]"], "display: none !important;")
 
     def test_no_styles_of_link_buttons(self):
-        # the pages have no link, so no rule styles the button of one; its
-        # tokens stay in section 1, a copy of the tokens of the invitations
+        # the pages have no link button, so no rule styles one; its tokens
+        # stay in section 1, a copy of the tokens of the invitations
         self.assertNotRegex(self.code, r"\.btn\b")
         self.assertIn("--btn-padding-block:", self.section_code("1"))
         header = self.raw[:self.raw.index("*/") + 2]
@@ -299,14 +299,26 @@ class MenuStylesTest(unittest.TestCase):
 
     def test_print_of_the_staff_page_is_compact(self):
         self.assertEqual(self.print[".menu--staff .section"], "margin-block: var(--space-md);")
+        # a part after another one: the step of the sections, not the larger one of the screen
+        self.assertEqual(self.print[".menu--staff .section__body > * + .heading-widget"],
+                         "margin-block-start: var(--space-md);")
         self.assertEqual(self.print[".seat-table td"], "padding-block: var(--space-3xs);")
         self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
         self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
         self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
 
     def test_print_keeps_the_head_of_a_section_with_what_follows(self):
-        # both: with `break-after` alone a browser splits the eyebrow from the title
-        self.assertEqual(self.print[".section__head"], "break-inside: avoid; break-after: avoid;")
+        # both: with `break-after` alone a browser splits the eyebrow from the
+        # title; the heading of a part is kept with its part the same way
+        self.assertEqual(self.print[".section__head, .heading-widget"], "break-inside: avoid; break-after: avoid;")
+
+    def test_the_heading_of_a_part_is_a_component(self):
+        self.assertEqual(self.components[".heading-widget__title"], "font-size: var(--text-lg);")
+        self.assertEqual(self.components[".heading-widget .heading-widget__eyebrow"],
+                         "margin-block: var(--space-2xs) 0;")
+        # a part after another one stands a larger step apart
+        self.assertEqual(self.components[".section__body > * + .heading-widget"],
+                         "margin-block-start: var(--space-xl);")
 
     def test_print_drops_the_shadows_of_the_cards(self):
         # a browser prints the blur of a rounded card as a grey rectangle
@@ -322,6 +334,99 @@ class MenuStylesTest(unittest.TestCase):
         # as compact as the sections of the staff page
         self.assertEqual(self.print[".menu--staff .page-footer"], self.print[".menu--staff .section"])
         self.assertEqual(self.print[".menu--staff .page-footer"], "margin-block: var(--space-md);")
+
+
+class SectionNavStylesTest(unittest.TestCase):
+    """The line of the sections: it sticks on the screen, it is not printed,
+    a jump to a section glides unless less motion is asked for, the body
+    scrolls the page on a touch screen."""
+
+    @classmethod
+    def setUpClass(cls):
+        raw = APP_CSS.read_text(encoding="utf-8")
+        cls.code = strip_comments(raw)
+        sections = section_texts(raw)
+        cls.base = strip_comments(sections["3"][1])
+        cls.components = strip_comments(sections["5"][1])
+        cls.page = rules(strip_comments(sections["5a"][1]))
+        cls.print = rules(media_blocks(strip_comments(sections["8"][1]), "print")[0])
+        cls.tokens = rules(strip_comments(sections["1a"][1]))[":root"]
+        # the code with every @media block taken out: what applies everywhere
+        cls.outside = re.sub(r"@media[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}", "", cls.code)
+
+    def media(self, css, condition):
+        blocks = media_blocks(css, condition)
+        self.assertEqual(len(blocks), 1, condition)
+        return rules(blocks[0])
+
+    def test_the_line_sticks_on_the_screen_only(self):
+        self.assertEqual(self.media(self.components, "screen")[".section-nav"],
+                         "position: sticky; inset-block-start: 0; z-index: var(--z-sticky);")
+        sticky = [selector for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", self.outside)
+                  if re.search(r"position:\s*sticky", body)]
+        self.assertEqual(sticky, [])
+        line = rules(self.components)[".section-nav"]
+        self.assertIn("block-size: var(--section-nav-block-size);", line)
+        self.assertIn("position: relative;", line)
+
+    def test_the_line_is_not_printed(self):
+        self.assertEqual(self.print[".section-nav"], "display: none;")
+        self.assertEqual(self.print[".section__head, .heading-widget"], "break-inside: avoid; break-after: avoid;")
+
+    def test_a_jump_glides_unless_less_motion_is_asked_for(self):
+        self.assertEqual(self.media(self.base, "(prefers-reduced-motion: no-preference)")["html.menu, html.menu body"],
+                         "scroll-behavior: smooth;")
+        self.assertNotRegex(self.outside, r"scroll-behavior:\s*smooth")
+        self.assertEqual(len(re.findall(r"scroll-behavior:\s*smooth", self.code)), 1)
+        reduce = self.media(self.base, "(prefers-reduced-motion: reduce)")
+        self.assertIn("scroll-behavior: auto !important;", reduce["*, *::before, *::after"])
+
+    def test_a_target_stops_under_the_line(self):
+        padding = "scroll-padding-block-start: calc(var(--section-nav-block-size) + var(--section-nav-gap));"
+        self.assertEqual(rules(self.base)["html.menu"], padding)
+        touch = self.media(self.base, "screen and (pointer: coarse)")
+        self.assertIn(padding, touch["html.menu body"])
+        self.assertIn("var(--tap-min)", re.search(r"--section-nav-size:([^;]+);", self.tokens).group(1))
+        self.assertEqual(re.search(r"--section-nav-block-size:([^;]+);", self.tokens).group(1).strip(),
+                         "calc(var(--section-nav-size) + var(--safe-inset-top) + var(--line-width-hairline))")
+
+    def test_the_body_scrolls_the_page_on_a_touch_screen_only(self):
+        touch = self.media(self.base, "screen and (pointer: coarse)")
+        self.assertEqual(touch["html.menu"], "block-size: 100%; overflow: hidden;")
+        self.assertTrue(touch["html.menu body"].startswith("block-size: 100%; min-block-size: 0; overflow-y: auto;"))
+        # nowhere else does the document stop scrolling
+        self.assertNotRegex(self.outside, r"html\.menu[^{]*\{[^}]*overflow")
+        # the canvas in the colour of the line, a body as tall as the screen: on the screen
+        screen = self.media(self.base, "screen")
+        self.assertEqual(screen["html.menu"], "background-color: var(--color-surface);")
+        self.assertEqual(screen["html.menu body"], "min-block-size: var(--viewport-height-dynamic);")
+
+    def test_the_fill_above_the_line_and_the_staff_bar_over_it(self):
+        components = rules(self.components)
+        fill = components[".section-nav::before"]
+        for declaration in ('content: "";', "position: absolute;", "inset-block-end: 100%;",
+                            "block-size: var(--viewport-height);", "background-color: inherit;",
+                            "pointer-events: none;"):
+            self.assertIn(declaration, fill)
+        self.assertIn("z-index: calc(var(--z-sticky) + var(--z-raised));", components[".staff-bar"])
+
+    def test_the_links_are_targets_for_a_finger_and_the_list_scrolls_by_itself(self):
+        components = rules(self.components)
+        link = components[".section-nav__link"]
+        self.assertIn("min-inline-size: var(--tap-min);", link)
+        self.assertIn("min-block-size: var(--tap-min);", link)
+        self.assertIn("white-space: nowrap;", link)
+        listing = components[".section-nav__list"]
+        self.assertIn("overflow-x: auto;", listing)
+        self.assertIn("display: flex;", listing)
+        # the focus ring inside the link: the scrolling list would cut it outside
+        self.assertEqual(components[".section-nav__link:focus-visible"],
+                         "outline-offset: var(--focus-ring-offset-inset);")
+        self.assertIn("box-shadow:", components['.section-nav__link[aria-current="true"]'])
+        # the guest page centres the links while they fit, the staff page starts at the left
+        self.assertEqual(self.page[".menu--guest .section-nav__item:first-child"], "margin-inline-start: auto;")
+        self.assertEqual(self.page[".menu--guest .section-nav__item:last-child"], "margin-inline-end: auto;")
+        self.assertNotRegex(" ".join(self.page), r"menu--staff \.section-nav")
 
 
 def declarations(body: str) -> dict[str, str]:

@@ -170,6 +170,19 @@ left of seat 7, so they are spread from the left end of the top side to it,
 40.5 px apart, with a warning (as for the five seats of the bottom side,
 which do not fit either).
 
+A guest page names no seat by its number. Its plan shows the seats of the
+record as larger circles, each in a colour of its own in the order of the
+seats of the record - blue (the accent), dark red, green - and under the plan
+a label of the same colour per seat names who sits there: the name of the
+seat, the name of the record at a first seat without one, "your guest" at a
++1 without a name. The one seat of a record of one seat has the label "You"
+by it as well. The colours differ in lightness enough to tell them apart in
+grey and with a colour vision deficiency, and the text of the plan for a
+screen reader says in words whose seat is marked in which colour. So a
+record has at most three seats: `validate` and `build` refuse more (split
+such a record in two). The couple, its label and the numbers of the seats
+are on the staff plan alone.
+
 ## Commands
 
 | Command | What it does |

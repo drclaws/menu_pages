@@ -155,28 +155,93 @@ class OutputChecksTest(support.TempDirTestCase):
 
     def test_a_link_outside_the_output_is_an_error(self):
         # another part of the site: outside the base path /menu, and a file
-        # the output does not have at the top of the site
+        # the output does not have at the top of the site; it is no part of
+        # the page either
+        not_a_part = f"…/index.html line {BODY_LINE}: <a href> {_output.LINK_RULE}"
         expected = {"/menu": "points outside the output", "/": "does not exist in the output"}
         for base, words in expected.items():
             with self.subTest(base=base):
                 out = self.make_output(base, {TOKENS[0]: f'<a href="{ELSEWHERE}">Other</a>'})
-                self.assertEqual(self.problems(out, base), [f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}"])
+                self.assertEqual(self.problems(out, base), [
+                    f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}",
+                    not_a_part,
+                ])
                 # with the token of the page in the address, that is a problem too
                 out = self.make_output(base, {TOKENS[0]: f'<a href="{ELSEWHERE}{TOKENS[0]}/">Other</a>'})
                 self.assertEqual(self.problems(out, base), [
                     f"…/index.html line {BODY_LINE}: <a href>: '/…' {words}",
+                    not_a_part,
                     f"guests.json: guest #1: its token is in …/index.html; {_output.TOKEN_RULE}",
                 ])
 
-    def test_a_link_to_another_page_of_the_output_holds_its_token(self):
-        # the address resolves, but it names the other page by its token
+    def test_a_link_to_another_page_of_the_output_is_an_error(self):
+        # the address resolves, but a page leads only to its own parts; the
+        # address names the other page by its token as well
         for base in ("/", "/menu"):
             with self.subTest(base=base):
                 link = f'<a href="{base.rstrip("/")}/{TOKENS[1]}/">Next</a>'
                 self.assertEqual(
                     self.problems(self.make_output(base, {TOKENS[0]: link}), base),
-                    [f"guests.json: guest #2: its token is in …/index.html; {_output.TOKEN_RULE}"],
+                    [
+                        f"…/index.html line {BODY_LINE}: <a href> {_output.LINK_RULE}",
+                        f"guests.json: guest #2: its token is in …/index.html; {_output.TOKEN_RULE}",
+                    ],
                 )
+
+    def test_a_link_to_a_part_of_the_same_page_passes(self):
+        self.assertEqual(_output.LINK_RULE,
+                         "must lead to a part of the same page ('#' and the id of an element of the page)")
+        bodies = {
+            "the target after the link": '<a href="#s-food">Food</a>\n<section id="s-food"></section>',
+            "the target before the link": '<h2 id="top">Menu</h2>\n<a href="#top">Top</a>',
+            "an area of a map": '<map name="m" id="m"><area shape="rect" coords="0,0,1,1" href="#m" alt=""></map>',
+            "a line of links": '<nav><a href="#a">A</a> <a href="#b">B</a></nav><p id="a">a</p><p id="b">b</p>',
+        }
+        for name, body in bodies.items():
+            with self.subTest(case=name):
+                for base in ("/", "/menu"):
+                    self.assertEqual(self.problems(self.make_output(base, {TOKENS[0]: body}), base), [])
+
+    def test_a_link_must_lead_to_an_element_of_its_own_page(self):
+        self.assertEqual(_output.LINK_TARGET_PROBLEM, "names no element of the page")
+        nowhere = f"…/index.html line {BODY_LINE}: <a href> {_output.LINK_TARGET_PROBLEM}"
+        not_a_part = f"…/index.html line {BODY_LINE}: <a href> {_output.LINK_RULE}"
+        cases = {
+            "an id the page does not have": ('<a href="#nowhere">Nowhere</a>', [nowhere]),
+            "an empty fragment": ('<a href="#">Top</a>', [nowhere]),
+            "an id of another page": ('<a href="#elsewhere">Next</a>', [nowhere]),
+            "no href": ("<a>Top</a>", [not_a_part]),
+            "an empty href": ('<a href="">Top</a>',
+                              [f"…/index.html line {BODY_LINE}: <a href>: the URL is empty", not_a_part]),
+            "an area that leads elsewhere": (
+                '<map name="m"><area shape="rect" coords="0,0,1,1" href="/other/" alt=""></map>',
+                [f"…/index.html line {BODY_LINE}: <area href>: '/…' does not exist in the output",
+                 f"…/index.html line {BODY_LINE}: <area href> {_output.LINK_RULE}"]),
+            "an area without href": ('<map name="m"><area shape="rect" coords="0,0,1,1" alt=""></map>',
+                                     [f"…/index.html line {BODY_LINE}: <area href> {_output.LINK_RULE}"]),
+        }
+        for name, (body, expected) in cases.items():
+            with self.subTest(case=name):
+                # the id of the last case stands on another page of the output
+                out = self.make_output(bodies={TOKENS[0]: body, TOKENS[1]: '<p id="elsewhere">x</p>'})
+                problems = self.problems(out)
+                self.assertEqual(problems, expected)
+                for message in problems:
+                    self.assertNotIn("nowhere", message)
+                    self.assertNotIn("elsewhere", message)
+
+    def test_the_same_link_problem_in_several_files_is_one_line(self):
+        body = '<p>one</p>\n<a href="#nowhere">x</a>\n<a href="#">y</a>\n<a href="/other/">z</a>'
+        out = self.make_output(bodies={token: body for token in TOKENS})
+        self.assertEqual(
+            _output.link_problems(out),
+            [
+                f"3 files: <a href> {_output.LINK_TARGET_PROBLEM}; first: …/index.html line {BODY_LINE + 1}",
+                f"3 files: <a href> {_output.LINK_RULE}; first: …/index.html line {BODY_LINE + 3}",
+            ],
+        )
+        self.assertEqual(_output.link_lines('<a href="#x">x</a>\n<b id="x"></b>\n<a href="#y">y</a>'),
+                         [(3, f"<a href> {_output.LINK_TARGET_PROBLEM}")])
 
     def test_no_file_holds_a_token(self):
         self.assertEqual(_output.TOKEN_RULE, "a token is only the name of the directory of its page")

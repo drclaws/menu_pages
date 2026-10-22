@@ -310,26 +310,59 @@ class FailingBuildTest(BuildTestCase):
         self.assert_quiet_about(result, self.menu, self.guests)
         self.assert_kept()
 
+    def with_link(self, link: str):
+        """`render_page` of a broken template: `link` at the end of every page."""
+        render_page = build.render_page
+
+        def rendered(template, tree):
+            return render_page(template, tree).replace("</main>", f"<p>{link}</p>\n</main>", 1)
+
+        return mock.patch.object(build, "render_page", rendered)
+
     def test_a_link_outside_the_output_fails(self):
         # a page that leads to another part of the site, rendered by a broken
         # template: under the base path /menu the address lies outside the
-        # output, at the top of the site it names no file of the output
-        render_page = build.render_page
-
-        def with_link(template, tree):
-            return render_page(template, tree).replace("</main>", '<p><a href="/other/x/">Other</a></p>\n</main>', 1)
-
+        # output, at the top of the site it names no file of the output; it
+        # is no part of the page either
         for base, words in (("/menu", "points outside the output"), ("/", "does not exist in the output")):
             with self.subTest(base=base):
-                with mock.patch.object(build, "render_page", with_link):
+                with self.with_link('<a href="/other/x/">Other</a>'):
                     result = self.build(self.data, self.out, "--base-path", base)
                 self.assertEqual(result.returncode, 1)
                 lines = result.stderr.splitlines()
-                self.assertEqual(len(lines), 2, lines)
+                self.assertEqual(len(lines), 3, lines)
                 self.assertRegex(lines[0], rf"^error: 13 files: <a href>: '/…' {words}; first: …/index\.html line \d+$")
-                self.assertEqual(lines[1], "build: failed with 1 error(s)")
+                self.assertRegex(lines[1], r"^error: 13 files: <a href> must lead to a part of the same page "
+                                           r"\('#' and the id of an element of the page\); first: …/index\.html "
+                                           r"line \d+$")
+                self.assertEqual(lines[2], "build: failed with 2 error(s)")
                 self.assert_quiet_about(result, self.menu, self.guests)
                 self.assert_kept()
+
+    def test_a_link_to_no_part_of_the_page_fails(self):
+        # an id the pages do not have and an empty fragment: one problem
+        for link in ('<a href="#nowhere">Nowhere</a>', '<a href="#">Top</a>'):
+            with self.subTest(link=link):
+                with self.with_link(link):
+                    result = self.build(self.data, self.out, "--base-path", "/menu")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout.splitlines(), ["build: 12 guest record(s) + staff validated "
+                                                              f"(data: {_core.display_path(self.data)})"])
+                lines = result.stderr.splitlines()
+                self.assertEqual(len(lines), 2, lines)
+                self.assertRegex(lines[0], r"^error: 13 files: <a href> names no element of the page; "
+                                           r"first: …/index\.html line \d+$")
+                self.assertEqual(lines[1], "build: failed with 1 error(s)")
+                self.assertNotIn("nowhere", result.stderr)
+                self.assert_quiet_about(result, self.menu, self.guests)
+                self.assert_kept()
+
+    def test_a_link_to_a_part_of_the_page_passes(self):
+        # the cover of every page has the id of its section
+        with self.with_link('<a href="#s-cover">Top</a>'):
+            result = self.build(self.data, self.tmp / "with-a-link", "--base-path", "/menu")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
 
     def test_a_token_written_into_the_data_fails(self):
         # a token typed into a text by mistake reads as a word to the checks

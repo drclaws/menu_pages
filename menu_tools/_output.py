@@ -12,9 +12,13 @@ nothing else (any other file of the code that would be published, a font or
 a note, is a problem), no element of a page may carry a `style` attribute,
 inside an inline SVG as well: the styles of the pages live in
 `assets/app.css` alone (the invitations' checks look at the URLs of a
-`style` attribute, not at the attribute itself), and no file holds the token
-of a record, in any letter case, its own page included: a token is only the
-name of the directory of its page.
+`style` attribute, not at the attribute itself), a page links only to its
+own parts: every `<a>` and `<area>` has an `href` of the form `#<id>`, the
+id of an element of the same page (the invitations' checks let a fragment
+pass without looking at its target, and a link to another page of the
+output would resolve), and no file holds the token of a record, in any
+letter case, its own page included: a token is only the name of the
+directory of its page.
 
 Every problem is reported in one `OutputError`, at most
 `MAX_REPORTED_PROBLEMS` lines as in the invitations.  The messages never
@@ -41,6 +45,12 @@ ASSET_FILES = ("app.css", "app.js", "favicon.svg")
 STYLE_PROBLEM = "the attribute 'style' is not allowed (the styles live in assets/app.css)"
 ASSETS_RULE = f"only {', '.join(ASSET_FILES[:-1])} and {ASSET_FILES[-1]} are published in {ASSETS_DIR}/"
 TOKEN_RULE = "a token is only the name of the directory of its page"
+#: The elements whose `href` is a link a reader follows.
+LINK_TAGS = ("a", "area")
+#: A link with no `href`, or one that is not a fragment of the page.
+LINK_RULE = "must lead to a part of the same page ('#' and the id of an element of the page)"
+#: A fragment that is empty or names no id of the page.
+LINK_TARGET_PROBLEM = "names no element of the page"
 
 #: The last line of a list of problems that was cut short.
 _MORE_RE = re.compile(r"… and (\d+) more problem\(s\) in the output\Z")
@@ -66,6 +76,45 @@ def style_lines(document: str) -> list[int]:
     finder.feed(document)
     finder.close()
     return finder.lines
+
+
+class _LinkFinder(HTMLParser):
+    """Collects the ids of a document and its links: (line, tag, href) of
+    every `<a>` and `<area>`, href None when the element has none."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.ids: set[str] = set()
+        self.links: list[tuple[int, str, str | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # a browser takes the first of two attributes of the same name
+        first: dict[str, str] = {}
+        for name, value in attrs:
+            first.setdefault(name, value or "")
+        if first.get("id"):
+            self.ids.add(first["id"])
+        if tag in LINK_TAGS:
+            self.links.append((self.getpos()[0], tag, first.get("href")))
+
+
+def link_lines(document: str) -> list[tuple[int, str]]:
+    """(line, problem) of every link of an HTML document that does not lead
+    to an element of the document itself: an `<a>` or `<area>` without an
+    `href` or with one that is not `#<id>` (`<a href> must lead to ...`), or
+    with a fragment that is empty or names no id of the document
+    (`<a href> names no element of the page`).  An id may stand anywhere in
+    the document, before or after the link."""
+    finder = _LinkFinder()
+    finder.feed(document)
+    finder.close()
+    problems = []
+    for line, tag, href in finder.links:
+        if href is None or not href.startswith("#"):
+            problems.append((line, f"<{tag} href> {LINK_RULE}"))
+        elif href[1:] not in finder.ids:
+            problems.append((line, f"<{tag} href> {LINK_TARGET_PROBLEM}"))
+    return problems
 
 
 def shown_path(relative: str) -> str:
@@ -126,6 +175,36 @@ def style_problems(out_dir: Path | str) -> list[str]:
     if len(places) == 1:
         return [f"{first} line {line}: {STYLE_PROBLEM}"]
     return [f"{len(places)} files: {STYLE_PROBLEM}; first: {first} line {line}"]
+
+
+def link_problems(out_dir: Path | str) -> list[str]:
+    """The links of the HTML files of an output directory that do not lead
+    to a part of their own page (`link_lines`), a line per problem and file
+    (its first place there), or one line for every file with the same
+    problem: `3 files: <problem>; first: …/index.html line 12`.  Neither the
+    address nor the text of a page is shown."""
+    root = Path(out_dir)
+    places: dict[str, list[tuple[str, int]]] = {}
+    for relative in _files(root, ".html"):
+        try:
+            text = (root / relative).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue  # `check_output` reports it
+        except OSError as exc:
+            raise _core.BuildError(f"cannot read {shown_path(relative)}: {exc.strerror}") from None
+        seen: set[str] = set()
+        for line, problem in link_lines(text):
+            if problem not in seen:
+                seen.add(problem)
+                places.setdefault(problem, []).append((shown_path(relative), line))
+    problems = []
+    for problem, found in places.items():
+        first, line = found[0]
+        if len(found) == 1:
+            problems.append(f"{first} line {line}: {problem}")
+        else:
+            problems.append(f"{len(found)} files: {problem}; first: {first} line {line}")
+    return problems
 
 
 def asset_problems(out_dir: Path | str) -> list[str]:
@@ -206,8 +285,8 @@ def check_menu_output(
     messages (see `token_problems`).
 
     The invitations' `check_output` with no media directory, then the files
-    of `assets/`, the `style` attributes of the pages and the tokens in the
-    files; every problem together raises one `OutputError`.
+    of `assets/`, the `style` attributes and the links of the pages and the
+    tokens in the files; every problem together raises one `OutputError`.
     """
     pages = list(pages)
     problems: list[str] = []
@@ -223,6 +302,7 @@ def check_menu_output(
             problems.pop()
     problems += asset_problems(out_dir)
     problems += style_problems(out_dir)
+    problems += link_problems(out_dir)
     problems += token_problems(out_dir, pages, numbers)
     if problems or stats is None:
         raise _core.OutputError(_limited(problems, hidden))
@@ -232,10 +312,14 @@ def check_menu_output(
 __all__ = [
     "ASSET_FILES",
     "ASSETS_RULE",
+    "LINK_RULE",
+    "LINK_TARGET_PROBLEM",
     "STYLE_PROBLEM",
     "TOKEN_RULE",
     "asset_problems",
     "check_menu_output",
+    "link_lines",
+    "link_problems",
     "shown_path",
     "style_lines",
     "style_problems",

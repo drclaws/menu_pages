@@ -218,12 +218,31 @@ def px(value) -> str:
 def expanded(table: dict) -> dict:
     """The same table with one item per seat (no `count`)."""
     copy_ = copy.deepcopy(table)
-    copy_["seats"] = [
-        {"arm": item["arm"], "side": item["side"]}
-        for item in table["seats"]
-        for _ in range(item.get("count", 1))
-    ]
+    copy_["seats"] = []
+    for item in table["seats"]:
+        for k in range(item.get("count", 1)):
+            seat = {"arm": item["arm"], "side": item["side"]}
+            if "align" in item:
+                seat["align"] = [item["align"][k]]
+            copy_["seats"].append(seat)
     return copy_
+
+
+def changed(make, change):
+    def build():
+        table = make()
+        change(table)
+        return table
+    return build
+
+
+def set_item(path, value):
+    def change(table):
+        target = table
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+    return change
 
 
 # --------------------------------------------------------------------------
@@ -338,6 +357,244 @@ class LayoutTest(unittest.TestCase):
             check_table(table).errors,
             ["table.arms[0] side 'top': too short for seats 2-8: 7 seat(s) need 234 px of free length"],
         )
+
+
+# --------------------------------------------------------------------------
+# Seats lined up with other seats (align)
+# --------------------------------------------------------------------------
+
+
+def thin_l_table(aligned: bool = True) -> dict:
+    """An L-shaped table of arms 44 px thick on 19 seats.  Aligned: seat 8
+    faces seat 1 across the table, seat 7 sits over seat 12 at the end of the
+    short arm, seats 13 and 14 inside the short arm face seats 11 and 10."""
+    seats = [
+        {"arm": "long", "side": "left"},                  # 1
+        {"arm": "long", "side": "top", "count": 6},       # 2-7
+        {"arm": "short", "side": "right", "count": 4},    # 8-11
+        {"arm": "short", "side": "bottom"},               # 12
+        {"arm": "short", "side": "left", "count": 2},     # 13-14
+        {"arm": "long", "side": "bottom", "count": 5},    # 15-19
+    ]
+    if aligned:
+        seats[1]["align"] = [None, None, None, None, None, 12]
+        seats[2]["align"] = [1, None, None, None]
+        seats[4]["align"] = [11, 10]
+    return {
+        "label": "L-shaped table",
+        "arms": [
+            {"id": "long", "x": 39, "y": 40, "width": 240, "height": 44},
+            {"id": "short", "x": 235, "y": 40, "width": 44, "height": 170},
+        ],
+        "seats": seats,
+    }
+
+
+#: The automatic layout of the thin L-shaped table (px).
+THIN_CENTRES = {
+    1: (17, 62),
+    **{n: (54 + 42 * (n - 2), 18) for n in range(2, 8)},
+    **{n: (301, 62 + 42 * (n - 8)) for n in range(8, 12)},
+    12: (257, 232), 13: (213, 179), 14: (213, 137),
+    **{n: (198 - 36 * (n - 15), 106) for n in range(15, 20)},
+}
+
+#: The same table with its seats aligned (px).
+ALIGNED_CENTRES = {
+    **THIN_CENTRES,
+    2: (54.5, 18), 3: (95, 18), 4: (135.5, 18), 5: (176, 18), 6: (216.5, 18), 7: (257, 18),
+    13: (213, 188), 14: (213, 146),
+}
+
+SQUEEZED_BOTTOM = "table.arms[0] side 'bottom': seats 15-19 squeezed closer than 42 px"
+SQUEEZED_TOP = "table.arms[0] side 'top': seats 2-7 squeezed closer than 42 px"
+
+
+def thin_centres(table: dict) -> dict[int, tuple[str, str]]:
+    return centres(guest(table, [1], pair=NO_COUPLE))
+
+
+def expected_centres(found: dict) -> dict[int, tuple[str, str]]:
+    return {n: (px(x), px(y)) for n, (x, y) in found.items()}
+
+
+def thin_with(path, value):
+    return changed(thin_l_table, set_item(path, value))
+
+
+#: (table, errors): every error of `align`, with the whole list of messages.
+ALIGN_CASES = [
+    (thin_with(["seats", 2, "align"], 1),
+     ["table.seats[2].align (seats 8-11): expected an array of 4 elements: a seat number or null for each seat"]),
+    (thin_with(["seats", 2, "align"], [1]),
+     ["table.seats[2].align (seats 8-11): expected an array of 4 elements: a seat number or null for each seat"]),
+    (thin_with(["seats", 3, "align"], []),
+     ["table.seats[3].align (seat 12): expected an array of one element: a seat number or null"]),
+    (thin_with(["seats", 2], {"arm": "short", "side": "right", "count": 0, "align": {}}), [
+        "table.seats[2].count (seats from 8): expected an integer from 1 to 20",
+        "table.seats[2].align (seats from 8): expected an array: a seat number or null for each seat",
+    ]),
+    (thin_with(["seats", 2, "align"], [0, "1", 1.0, True]), [
+        "table.seats[2].align[0] (seat 8): expected a seat number or null",
+        "table.seats[2].align[1] (seat 9): expected a seat number or null",
+        "table.seats[2].align[2] (seat 10): expected a seat number or null",
+        "table.seats[2].align[3] (seat 11): expected a seat number or null",
+    ]),
+    (thin_with(["seats", 2, "align"], [20, None, None, None]),
+     ["table.seats[2].align[0] (seat 8): refers to no seat: the table has 19 seats"]),
+    (thin_with(["seats", 2, "align"], [8, None, None, None]),
+     ["table.seats[2].align[0] (seat 8): refers to the seat itself"]),
+    (thin_with(["seats", 2, "align"], [None, None, None, 8]),
+     ["table.seats[2].align[3] (seat 11): refers to seat 8 on the same side of the same arm"]),
+    # an item of its own on the same side
+    (changed(lambda: expanded(thin_l_table()), set_item(["seats", 8, "align"], [8])),
+     ["table.seats[8].align[0] (seat 9): refers to seat 8 on the same side of the same arm"]),
+    (thin_with(["seats", 0, "align"], [8]),
+     ["table.seats[0].align[0] (seat 1): the alignment goes round in a circle through seats 1, 8"]),
+    (changed(thin_l_table, lambda t: (
+        set_item(["seats", 0, "align"], [8])(t),
+        set_item(["seats", 2, "align"], [13, None, None, None])(t),
+        set_item(["seats", 4, "align"], [1, None])(t),
+    )), ["table.seats[0].align[0] (seat 1): the alignment goes round in a circle through seats 1, 8, 13"]),
+    # through a seat placed by an aligned seat: 1 to 13, 13 to 11, 11 follows 8, 8 to 1
+    (thin_with(["seats", 0, "align"], [13]),
+     ["table.seats[0].align[0] (seat 1): the alignment goes round in a circle through seats 1, 8, 11, 13"]),
+    # into the corner kept free between the arms
+    (thin_with(["seats", 4, "align"], [11, 8]),
+     ["table.seats[4].align[1] (seat 14): lines the seat up off the free part of its side"]),
+    # past the end of the table
+    (thin_with(["seats", 1, "align"], [None, None, None, None, None, 8]),
+     ["table.seats[1].align[5] (seat 7): lines the seat up off the free part of its side"]),
+    (thin_with(["seats", 4, "align"], [10, 11]),
+     ["table.seats[4].align[1] (seat 14): puts the seat at or before seat 13, "
+      "against the clockwise order of its side"]),
+    (thin_with(["seats", 4, "align"], [11, 11]),
+     ["table.seats[4].align[1] (seat 14): puts the seat at or before seat 13, "
+      "against the clockwise order of its side"]),
+    # seat 14 at the start of its free part, next to seat 15 of the long arm
+    (thin_with(["seats", 4, "align"], [11, 18]), ["seats 14 and 15: closer than 34 px"]),
+]
+
+
+class AlignTest(unittest.TestCase):
+    def test_aligned_seats_take_the_coordinate_of_their_seats(self):
+        found = thin_centres(thin_l_table())
+        self.assertEqual(found[8][1], found[1][1])
+        self.assertEqual(found[13][1], found[11][1])
+        self.assertEqual(found[14][1], found[10][1])
+        self.assertEqual(found[7][0], found[12][0])
+        # seat 12 in the middle of the end of the short arm: (235 + 279) / 2
+        self.assertEqual(found[12], ("257", "232"))
+
+    def test_layout_of_the_aligned_table(self):
+        table = thin_l_table()
+        self.assertEqual(check_table(table), TableCheck([], [SQUEEZED_BOTTOM, SQUEEZED_TOP], 19))
+        self.assertEqual(thin_centres(table), expected_centres(ALIGNED_CENTRES))
+
+    def test_without_align_the_layout_stays_automatic(self):
+        table = thin_l_table(aligned=False)
+        self.assertEqual(check_table(table), TableCheck([], [SQUEEZED_BOTTOM], 19))
+        self.assertEqual(thin_centres(table), expected_centres(THIN_CENTRES))
+        nulls = thin_l_table(aligned=False)
+        for item in nulls["seats"]:
+            item["align"] = [None] * item.get("count", 1)
+        self.assertEqual(check_table(nulls), check_table(table))
+        self.assertEqual(guest(nulls, [8, 9], [9], pair=NO_COUPLE), guest(table, [8, 9], [9], pair=NO_COUPLE))
+        self.assertEqual(staff(nulls, {10: ["G"]}, pair=NO_COUPLE), staff(table, {10: ["G"]}, pair=NO_COUPLE))
+
+    def test_guest_and_staff_schemes_share_the_coordinates(self):
+        table = thin_l_table()
+        expected = expected_centres(ALIGNED_CENTRES)
+        for number in range(1, 20):
+            with self.subTest(seat=number):
+                self.assertEqual(centres(guest(table, [number], pair=NO_COUPLE)), expected)
+        self.assertEqual(centres(staff(table, {7: ["A"], 13: ["N", "V"]}, pair=NO_COUPLE)), expected)
+
+    def test_seats_before_an_aligned_seat_that_do_not_fit_are_spread_up_to_the_end(self):
+        # 42 px to the left of seat 7 would put seat 2 at 47, past 39 + 15
+        found = thin_centres(thin_l_table())
+        self.assertEqual([found[n][0] for n in range(2, 8)], ["54.5", "95", "135.5", "176", "216.5", "257"])
+
+    def test_seats_after_an_aligned_seat_follow_it_at_42_px(self):
+        # seat 8 faces seat 6 across the east arm: 5 px lower than without align
+        table = u_table()
+        table["seats"][5]["align"] = [6, None, None, None]
+        self.assertEqual(check_table(table).errors, [])
+        found = centres(guest(table, [1], pair=NO_COUPLE))
+        self.assertEqual([found[n][1] for n in range(8, 12)], ["87", "129", "171", "213"])
+        self.assertEqual(found[8][1], found[6][1])
+
+    def test_seats_after_an_aligned_seat_that_do_not_fit_are_spread_up_to_the_end(self):
+        # seat 8 faces seat 5: 42 px below it seat 11 would come to 255, past 250 - 15
+        table = u_table()
+        table["seats"][5]["align"] = [5, None, None, None]
+        self.assertEqual(
+            check_table(table),
+            TableCheck([], ["table.arms[2] side 'right': seats 8-11 squeezed closer than 42 px"], 20),
+        )
+        found = centres(guest(table, [1], pair=NO_COUPLE))
+        self.assertEqual([found[n][1] for n in range(8, 12)], ["129", "164", "199", "234"])
+        self.assertEqual(found[8][1], found[5][1])
+
+    def test_a_side_with_aligned_seats_is_reported_squeezed_once(self):
+        # seat 19 under seat 2: the bottom side is squeezed as without align
+        table = thin_l_table(aligned=False)
+        table["seats"][5]["align"] = [None, None, None, None, 2]
+        self.assertEqual(check_table(table), TableCheck([], [SQUEEZED_BOTTOM], 19))
+        found = thin_centres(table)
+        self.assertEqual([found[n][0] for n in range(15, 20)], ["198", "162", "126", "90", "54"])
+        self.assertEqual(found[19][0], found[2][0])
+
+    def test_seats_between_two_aligned_seats_are_spread_evenly(self):
+        table = thin_l_table()
+        table["seats"][1]["align"] = [19, None, None, None, None, 12]
+        check = check_table(table)
+        self.assertEqual(check.errors, [])
+        self.assertIn(SQUEEZED_TOP, check.warnings)
+        found = thin_centres(table)
+        self.assertEqual([found[n][0] for n in range(2, 8)], ["54", "94.5", "135", "175.5", "216", "257"])
+        self.assertEqual(found[2][0], found[19][0])
+
+    def test_a_seat_may_align_to_a_later_seat_and_in_a_chain(self):
+        # seat 2 faces seat 6, which faces seat 8: both come after it
+        table = u_table()
+        table["seats"][1]["align"] = [6, None]
+        table["seats"][3]["align"] = [None, 8]
+        self.assertEqual(check_table(table).errors, [])
+        found = centres(guest(table, [1], pair=NO_COUPLE))
+        self.assertEqual({found[n][1] for n in (2, 6, 8)}, {"82"})
+        self.assertEqual((found[3][1], found[5][1]), ("124", "124"))
+        self.assertEqual(found[8][1], centres(guest(u_table(), [1], pair=NO_COUPLE))[8][1])
+
+    def test_the_shift_of_a_side_with_aligned_seats_has_no_effect(self):
+        shifted = thin_l_table()
+        shifted["arms"][1]["shift"] = {"right": 10}
+        self.assertEqual(thin_centres(shifted), thin_centres(thin_l_table()))
+        plain = thin_l_table(aligned=False)
+        plain["arms"][1]["shift"] = {"right": 10}
+        self.assertEqual(thin_centres(plain)[8], ("301", "72"))
+
+    def test_count_and_the_expanded_list_give_the_same_result_with_align(self):
+        table = thin_l_table()
+        self.assertEqual(check_table(expanded(table)), check_table(table))
+        self.assertEqual(guest(expanded(table), [13, 14], [14], pair=NO_COUPLE),
+                         guest(table, [13, 14], [14], pair=NO_COUPLE))
+        self.assertEqual(staff(expanded(table), {7: ["A"]}, pair=NO_COUPLE),
+                         staff(table, {7: ["A"]}, pair=NO_COUPLE))
+
+    def test_every_error_of_align(self):
+        for make, messages in ALIGN_CASES:
+            with self.subTest(messages=messages):
+                self.assertEqual(check_table(make()).errors, messages)
+
+    def test_labels_follow_the_aligned_seats(self):
+        # seat 14 sits 9 px lower than without align, its "You" label too
+        plain = guest(thin_l_table(aligned=False), [14], pair=NO_COUPLE)["labels"]
+        aligned = guest(thin_l_table(), [14], pair=NO_COUPLE)["labels"]
+        self.assertEqual(len(plain), 1)
+        self.assertEqual(len(aligned), 1)
+        self.assertEqual(aligned[0]["x"], plain[0]["x"])
+        self.assertEqual(Fraction(aligned[0]["y"]) - Fraction(plain[0]["y"]), 9)
 
 
 # --------------------------------------------------------------------------
@@ -641,23 +898,6 @@ class CoupleTest(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 
-def changed(make, change):
-    def build():
-        table = make()
-        change(table)
-        return table
-    return build
-
-
-def set_item(path, value):
-    def change(table):
-        target = table
-        for key in path[:-1]:
-            target = target[key]
-        target[path[-1]] = value
-    return change
-
-
 def close_tables() -> dict:
     return {
         "label": "Two tables close together",
@@ -677,7 +917,7 @@ RULE_CASES = [
     (1, changed(l_table, set_item(["arms", 1, "radius"], 4)),
      "table.arms[1]: unknown field (allowed: height, id, shift, width, x, y)"),
     (1, changed(l_table, set_item(["seats", 3, "number"], 11)),
-     "table.seats[3] (seat 11): unknown field (allowed: arm, count, side)"),
+     "table.seats[3] (seat 11): unknown field (allowed: align, arm, count, side)"),
     (2, changed(l_table, set_item(["label"], "")), "table.label: expected a non-empty one-line string"),
     (2, changed(l_table, set_item(["label"], "Two\nlines")), "table.label: expected a non-empty one-line string"),
     (3, changed(l_table, set_item(["arms"], [])), "table.arms: expected a non-empty array"),
@@ -830,6 +1070,13 @@ SECRET_CHANGES = [
     lambda t: t["arms"].append({"id": "qznear", "x": 77, "y": 50, "width": 130, "height": 43}),
     set_item(["seats", 0], {"arm": "qzarm", "side": "top"}),
     set_item(["seats"], [{"arm": "qzarm", "side": "top", "count": 20}] * 5),
+    set_item(["seats", 1, "align"], "qz777"),
+    set_item(["seats", 1, "align"], [None] * 7),
+    set_item(["seats", 1, "align"], ["qz", 77, 1.5, None, None]),
+    set_item(["seats", 1, "align"], [None, None, None, None, 7]),
+    set_item(["seats", 2, "align"], [3]),
+    set_item(["seats", 0, "align"], [2]),
+    lambda t: (set_item(["seats", 0, "align"], [7])(t), set_item(["seats", 2, "align"], [1])(t)),
 ]
 
 

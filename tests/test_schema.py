@@ -269,6 +269,15 @@ def _(menu, guests):
     menu["table"]["arms"][1]["height"] = 300
 
 
+@case(
+    "seats_aligned_in_a_circle",
+    errors=[M + "table.seats[0].align[0] (seat 1): the alignment goes round in a circle through seats 1, 8"],
+)
+def _(menu, guests):
+    menu["table"]["seats"][0]["align"] = [8]
+    menu["table"]["seats"][2]["align"] = [1, None, None, None, None]
+
+
 @case("couple_on_an_unknown_arm", errors=[M + "couple.arm: not an id of table.arms"])
 def _(menu, guests):
     menu["couple"]["arm"] = "middle"
@@ -887,6 +896,16 @@ class TableMessagesTest(unittest.TestCase):
         menu["couple"]["members"][1]["requirements"] = ["nuts", "gluten", "lactose"]
         errors = check(menu, guests)[1]
         self.assertEqual(errors, [M + "field 'couple.members[1].requirements' needs 3 badges, seat 7 has room for 2"])
+
+    def test_a_table_with_aligned_seats(self):
+        menu, guests = fixtures.reserved19()
+        # seat 8 faces seat 1, seats 14 and 15 inside the short arm face seats 12 and 11
+        menu["table"]["seats"][2]["align"] = [1, None, None, None, None]
+        menu["table"]["seats"][4]["align"] = [12, 11]
+        index, errors, warnings = check(menu, guests)
+        self.assertEqual((errors, warnings), ([], []))
+        self.assertTrue(index.table_ok)
+        self.assertEqual(index.total, 19)
 
     def test_a_broken_table_still_counts_its_seats(self):
         menu, guests = fixtures.reserved19()

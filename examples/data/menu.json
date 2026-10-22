@@ -105,7 +105,14 @@
       {
         "arm": "short",
         "side": "right",
-        "count": 5
+        "count": 5,
+        "align": [
+          1,
+          null,
+          null,
+          null,
+          null
+        ]
       },
       {
         "arm": "short",
@@ -114,7 +121,11 @@
       {
         "arm": "short",
         "side": "left",
-        "count": 2
+        "count": 2,
+        "align": [
+          12,
+          11
+        ]
       },
       {
         "arm": "long",

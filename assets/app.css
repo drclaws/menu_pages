@@ -583,8 +583,23 @@ html.menu {
     background-color: var(--color-surface);
   }
 
+  /* The end of the page is on the background of the page too. The last
+     block (a section, or the footer of the staff page) ends with the
+     margin of a section, the same air as between two sections. In a body
+     of plain block flow that margin collapses with the end margins of its
+     parents (the main element, the body) and lies past the end of the
+     body, on the canvas: a grey strip right under the last line. flow-root
+     keeps the margin inside the body. On a touch screen the body scrolls the page (below): a scroll
+     container holds the margin as well, and its scroll area ends with the
+     margin and the padding. The padding is the safe area at the foot of
+     the screen (a home indicator, a bar of the browser over the page; the
+     page reaches under it with viewport-fit=cover), so the last line stops
+     above it; elsewhere the padding is 0. The minimum size takes the
+     padding in (border-box): a short page does not scroll. */
   html.menu body {
+    display: flow-root;
     min-block-size: var(--viewport-height-dynamic);
+    padding-block-end: var(--safe-inset-bottom);
   }
 }
 

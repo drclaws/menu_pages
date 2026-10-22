@@ -30,9 +30,9 @@ DASH = " — "
 #: Between the parts of a line ("vegan · gluten-free").
 DOT = " · "
 
-#: After the name of a guest who brings a companion.
-YOUR_GUEST = "and your guest"
-YOUR_GUESTS = "and your guests"
+#: In place of the names of the companions that are not known: one, or two or more.
+YOUR_GUEST = "your guest"
+YOUR_GUESTS = "your guests"
 
 #: The first and the next swap lines of a set.
 IF_CHOSEN_BY = "If chosen by"
@@ -53,12 +53,17 @@ NOTES = "dietary notes"
 _FINAL_MARKS = (".", "!", "?")
 
 
-def number_list(numbers: Iterable[int], last: str = LAST_SEPARATOR) -> str:
-    """`[9, 8]` -> "8 & 9"; `[10, 8, 9]` -> "8, 9 & 10"; `[8]` -> "8"."""
-    texts = [str(number) for number in sorted(numbers)]
+def _series(texts: Sequence[str], last: str) -> str:
+    """The texts in their order, `last` before the last one and
+    LIST_SEPARATOR between the others."""
     if len(texts) < 2:
         return "".join(texts)
     return LIST_SEPARATOR.join(texts[:-1]) + last + texts[-1]
+
+
+def number_list(numbers: Iterable[int], last: str = LAST_SEPARATOR) -> str:
+    """`[9, 8]` -> "8 & 9"; `[10, 8, 9]` -> "8, 9 & 10"; `[8]` -> "8"."""
+    return _series([str(number) for number in sorted(numbers)], last)
 
 
 def seat_label(numbers: Sequence[int]) -> str:
@@ -79,13 +84,18 @@ def mine_text(numbers: Sequence[int]) -> str:
     return number_list(numbers, AND)
 
 
-def who_label(name: str, companions: int) -> str:
-    """"Olga", "Olga and your guest", "Olga and your guests": the name of
-    the record and how many companions (`plusOne` seats) come with it.  The
-    names of the companions are never shown to the guest."""
-    if companions <= 0:
-        return name
-    return f"{name} {YOUR_GUEST if companions == 1 else YOUR_GUESTS}"
+def who_label(name: str, companions: Sequence[str]) -> str:
+    """"Olga", "Olga and Oscar", "Olga, Oscar and Hugo", "Olga and your
+    guest", "Olga, Oscar and your guests": the name of the record and of
+    the companions who come with it (its `plusOne` seats, in their order).
+    `companions` holds the name of each companion, "" for one without a
+    name; those are "your guest" or "your guests", after the names.  The
+    page of the record is the only one that shows this label."""
+    named = [companion for companion in companions if companion]
+    unknown = len(companions) - len(named)
+    if unknown:
+        named.append(YOUR_GUEST if unknown == 1 else YOUR_GUESTS)
+    return _series([name, *named], AND)
 
 
 def section_title(seats: int) -> str:

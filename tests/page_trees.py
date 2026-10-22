@@ -17,16 +17,17 @@ has the line of the sections (`nav`): the others render as pages without it.
 The trees:
 
 * `guest_plus_one` - Olga with her +1 at seats 8 and 9, marked on the plan of
-  the table with "You" and "+1";
+  the table with "You" and "+1"; the +1 has no name ("your guest");
 * `guest_without_table` - Klara at seat 1 of a menu without a table, with
   three sets and one line of drinks;
 * `guest_pair` - Peggy and Victor, one record with two named seats, one set;
   the menu has a table, but the widget shows no plan (the scheme is `None`:
   the page reads the same without a drawing);
-* `guest_parts` - Nina with her +1 at seats 15 and 16, without a plan: the
-  food in one section of two parts under their headings (the set cards
-  under the second one a level lower), a section of texts under headings,
-  the line of the sections over it all (the signature has no link there);
+* `guest_parts` - Nina with her +1 Oscar at seats 15 and 16, named in the
+  label of the seats, without a plan: the food in one section of two parts
+  under their headings (the set cards under the second one a level lower), a
+  section of texts under headings, the line of the sections over it all (the
+  signature has no link there);
 * `staff` - the staff page: the legend, the plan with the badges of the
   dietary notes, every seat (a free and a reserved one among them, a +1 with
   a name and one without), the swaps, a dish for the staff only, the notes
@@ -457,7 +458,7 @@ INFO = (("Smoking", "Smoking is fine on the terrace by the river."),
 
 
 def guest_parts() -> dict:
-    """Nina and her +1: the food in two parts, short notes under headings."""
+    """Nina and her +1 Oscar: the food in two parts, short notes under headings."""
     info = []
     for number, (title, text) in enumerate(INFO):
         info += [heading("info", 2 * number + 1, title),
@@ -467,7 +468,7 @@ def guest_parts() -> dict:
         cover(),
         section("seats", "Your seats", widgets=[seating(
             "seats", my_seats=((15, "you"), (16, "plusOne")), seat_label="Seats 15 & 16",
-            who_label="Nina and your guest")]),
+            who_label="Nina and Oscar")]),
         section("food", "Food", widgets=[
             heading("food", 1, "Starters", "Shared plates for the table"),
             widget("dishes", "food", 2, title="", items=dishes(STARTERS[:3], False)),

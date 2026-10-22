@@ -834,7 +834,8 @@ class WidgetTests(unittest.TestCase):
     def test_the_seats_of_a_guest(self):
         cases = {"guest-plus-one": ("Seats 8 &amp; 9", "Olga and your guest"),
                  "guest-without-table": ("Seat 1", "Klara"),
-                 "guest-pair": ("Seats 12 &amp; 13", "Peggy and Victor")}
+                 "guest-pair": ("Seats 12 &amp; 13", "Peggy and Victor"),
+                 "guest-parts": ("Seats 15 &amp; 16", "Nina and Oscar")}
         for name, (seats, who) in cases.items():
             section = self.section(name, "seats")
             with self.subTest(page=name):

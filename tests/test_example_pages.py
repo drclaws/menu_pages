@@ -202,6 +202,19 @@ class ExamplePagesTest(unittest.TestCase):
         self.assertIn("Shared plates for the table", guest)
         self.assertNotIn("on the table by 19:15", guest)
 
+    def test_the_label_of_the_seats_names_the_companions_with_a_name(self):
+        expected = {
+            "data": {"Greta": "Greta and Hugo", "Trent": "Trent and Oscar", "Heidi": "Heidi and your guest",
+                     "Peggy and Walter": "Peggy and Walter", "Rupert": "Rupert"},
+            "data-plain": {"Astrid": "Astrid and your guest", "Ezra": "Ezra"},
+        }
+        for name, (_out, _menu, guests, pages, _staff) in self.built.items():
+            tokens = {record.get("name"): record["token"] for record in guests}
+            for person, label in expected[name].items():
+                with self.subTest(set=name, record=person):
+                    self.assertEqual(re.findall(r'<span class="seating__who">([^<]*)</span>', pages[tokens[person]]),
+                                     [label])
+
     def test_the_table_plan_is_drawn_where_there_is_a_table(self):
         for name, (_out, menu, _guests, pages, staff) in self.built.items():
             for token, page in pages.items():

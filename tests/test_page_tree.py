@@ -84,9 +84,18 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(_words.mine_text([10, 8, 9]), "8, 9 and 10")
 
     def test_who_label(self):
-        self.assertEqual(_words.who_label("Olga", 0), "Olga")
-        self.assertEqual(_words.who_label("Olga", 1), "Olga and your guest")
-        self.assertEqual(_words.who_label("Olga", 2), "Olga and your guests")
+        self.assertEqual(_words.who_label("Olga", []), "Olga")
+        # the companions without a name
+        self.assertEqual(_words.who_label("Olga", [""]), "Olga and your guest")
+        self.assertEqual(_words.who_label("Olga", ["", ""]), "Olga and your guests")
+        # the companions with a name, in their order
+        self.assertEqual(_words.who_label("Olga", ["Oscar"]), "Olga and Oscar")
+        self.assertEqual(_words.who_label("Olga", ["Oscar", "Hugo"]), "Olga, Oscar and Hugo")
+        # both: the names first
+        self.assertEqual(_words.who_label("Olga", ["Oscar", ""]), "Olga, Oscar and your guest")
+        self.assertEqual(_words.who_label("Olga", ["", "Oscar"]), "Olga, Oscar and your guest")
+        self.assertEqual(_words.who_label("Olga", ["", "Oscar", ""]), "Olga, Oscar and your guests")
+        self.assertEqual(_words.who_label("Olga", ["Oscar", "", "Hugo"]), "Olga, Oscar, Hugo and your guest")
 
     def test_counters(self):
         self.assertEqual(_words.guests_text(1), "1 guest")
@@ -139,11 +148,20 @@ class GuestSeatsTest(unittest.TestCase):
         self.assertEqual(widget["mySeats"], [{"number": 8, "mark": "you"}, {"number": 9, "mark": "plusOne"}])
         self.assertEqual(widget["scheme"]["mine"], "8 and 9")
 
+    def test_a_plus_one_with_a_name(self):
+        # the label under the plan names the companion; the marks on the plan are "You" and "+1"
+        widget = self.seating_of("Nina")
+        self.assertEqual(widget["seatLabel"], "Seats 15 & 16")
+        self.assertEqual(widget["whoLabel"], "Nina and Oscar")
+        self.assertEqual(widget["mySeats"], [{"number": 15, "mark": "you"}, {"number": 16, "mark": "plusOne"}])
+        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in widget["scheme"]["labels"]],
+                         [(True, False), (False, True)])
+
     def test_a_plus_one_across_the_end_of_the_numbers(self):
         # the guest on seat 19, the +1 on seat 1: neighbours on the plan
         widget = self.seating_of("Greta")
         self.assertEqual(widget["seatLabel"], "Seats 1 & 19")
-        self.assertEqual(widget["whoLabel"], "Greta and your guest")
+        self.assertEqual(widget["whoLabel"], "Greta and Hugo")
         self.assertEqual(widget["mySeats"], [{"number": 1, "mark": "plusOne"}, {"number": 19, "mark": "you"}])
         scheme = widget["scheme"]
         self.assertEqual(scheme["mine"], "1 and 19")
@@ -179,6 +197,20 @@ class GuestSeatsTest(unittest.TestCase):
         self.assertEqual({item["mark"] for item in widget["mySeats"]}, {"none"})
         self.assertEqual(widget["scheme"]["labels"], [])
         self.assertEqual(widget["scheme"]["mine"], "8, 9, 12 and 13")
+
+    def test_companions_with_and_without_a_name(self):
+        menu, guests = fixtures.mockup16()
+        olga = guests[0]
+        olga["seats"].append({"number": 12, "plusOne": True, "name": "Hugo"})
+        trees, _report = build(menu, guests)
+        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Hugo and your guest")
+        olga["seats"][1]["name"] = "Ada"
+        trees, _report = build(menu, guests)
+        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Ada and Hugo")
+        # a name of blanks is no name
+        olga["seats"][2]["name"] = "  "
+        trees, _report = build(menu, guests)
+        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Ada and your guest")
 
     def test_the_couple_on_the_plan_of_a_guest(self):
         scheme = self.seating_of("Boris")["scheme"]

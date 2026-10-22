@@ -1,0 +1,5 @@
+<!-- The heading of a part of a section; expects in `.`: domId, titleId, title, eyebrow ("" - none). The title is the h3 of the part (the section has the h2, a set card under it the h4); the eyebrow, in small capitals, stands under it. The widgets after it, up to the next heading, are the part; the page never has a heading with nothing under it. -->
+<header class="widget heading-widget" id="{{.domId}}">
+  <h3 class="heading-widget__title" id="{{.titleId}}">{{.title}}</h3><!-- if:.eyebrow -->
+  <p class="section__subtitle heading-widget__eyebrow">{{.eyebrow}}</p><!-- endif -->
+</header>

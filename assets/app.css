@@ -8,11 +8,11 @@
      2.  Fonts              - the system stack, no font files
      3.  Base               - reset, typography, accessibility
      4.  Layout primitives  - container, grid, vertical rhythm
-     5.  Components         - section head, prose, card, time label, divider,
-                              label-and-text list, note line, pills, legend,
-                              seat table, seating, text widget, dish list,
-                              drinks, staff bar and footer, set switcher,
-                              set card
+     5.  Components         - section head, heading of a part, prose, card,
+                              time label, divider, label-and-text list,
+                              note line, pills, legend, seat table, seating,
+                              text widget, dish list, drinks, staff bar and
+                              footer, set switcher, set card
      5a. Page               - compact cover, staff header, the audience:
                               alignment and type size
      6.  Scheme             - the table scheme
@@ -828,6 +828,23 @@ hr {
 
 .section__body {
   --flow-space: var(--space-md);
+}
+
+/* --- Heading of a part: a heading widget -------------------------------------
+   The h3 of a part of a section, its eyebrow in small capitals under it, as
+   the head of the section above. A part after another one stands a larger
+   step apart, so the parts read as blocks; the first part follows the head
+   of the section at the usual step. */
+.heading-widget__title {
+  font-size: var(--text-lg);
+}
+
+.heading-widget .heading-widget__eyebrow {
+  margin-block: var(--space-2xs) 0;
+}
+
+.section__body > * + .heading-widget {
+  margin-block-start: var(--space-xl);
 }
 
 /* --- Prose ------------------------------------------------------------------ */
@@ -1820,10 +1837,12 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
    ========================================================================== */
 
 @media print {
-  /* The head of a section never stays alone at the foot of a sheet: it goes
-     to the sheet of what follows it. It never splits either, or a browser
-     would leave the eyebrow behind and carry the title alone. */
-  .section__head {
+  /* The head of a section and the heading of a part never stay alone at the
+     foot of a sheet: they go to the sheet of what follows them. They never
+     split either, or a browser would leave the eyebrow behind and carry the
+     title alone. */
+  .section__head,
+  .heading-widget {
     break-inside: avoid;
     break-after: avoid;
   }
@@ -1934,6 +1953,12 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
 
   .menu--staff .section {
     margin-block: var(--space-md);
+  }
+
+  /* A part after another one: the same compact step as between the
+     sections, not the larger one of the screen. */
+  .menu--staff .section__body > * + .heading-widget {
+    margin-block-start: var(--space-md);
   }
 
   .menu--staff .page-footer {

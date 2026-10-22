@@ -21,6 +21,9 @@ Ivan & Vera at a bistro, an L-shaped table of sixteen seats.  The trees:
 * `guest_pair` - Peggy and Victor, one record with two named seats, one set;
   the menu has a table, but the widget shows no plan (the scheme is `None`:
   the page reads the same without a drawing);
+* `guest_parts` - Nina with her +1 at seats 15 and 16, without a plan: the
+  food in one section of two parts under their headings (the set cards
+  under the second one a level lower), a section of texts under headings;
 * `staff` - the staff page: the legend, the plan with the badges of the
   dietary notes, every seat (a free and a reserved one among them, a +1 with
   a name and one without), the swaps, a dish for the staff only, the notes
@@ -34,7 +37,7 @@ from typing import Iterator
 #: The types of sections and widgets: the names of the files in
 #: fragments/sections/ and fragments/widgets/.
 SECTION_TYPES = ("cover", "custom")
-WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks")
+WIDGET_TYPES = ("text", "seating", "dishes", "sets", "drinks", "heading")
 
 #: The fields every widget has, whatever its type.
 WIDGET_COMMON_FIELDS = ("type", "domId", "labelledBy")
@@ -53,12 +56,13 @@ NODES = {
     "widget:dishes": WIDGET_COMMON_FIELDS + ("title", "items"),
     "widget:sets": WIDGET_COMMON_FIELDS + ("items", "note", "count", "multiple"),
     "widget:drinks": WIDGET_COMMON_FIELDS + ("groups", "list", "note"),
+    "widget:heading": WIDGET_COMMON_FIELDS + ("titleId", "title", "eyebrow"),
     "mySeat": ("number", "mark"),
     "legend": ("letter", "label"),
     "row": ("number", "name", "isPlusOne", "hostName", "roleLabel", "isCouple", "isFree",
             "tags"),
     "dish": ("name", "ingredients", "allergens", "tags", "noRestrictions", "swapLines", "note"),
-    "set": ("id", "domId", "title", "hint", "eyebrow", "courses", "pairing", "swapLines"),
+    "set": ("id", "domId", "title", "hint", "eyebrow", "courses", "pairing", "swapLines", "nested"),
     "group": ("title", "layout", "joined", "items"),
     "drink": ("category", "name", "line"),
     "scheme": ("width", "height", "hidden", "tableLabel", "total", "mine", "single", "outline",
@@ -172,10 +176,18 @@ def section(section_id: str, title: str, eyebrow: str = "", note: str = "",
                 widgets=widgets or [])
 
 
-def widget(kind: str, section_id: str, number: int, **fields) -> dict:
-    """A widget; `number` is its place in the data (hidden ones count as well)."""
+def widget(kind: str, section_id: str, number: int, *, labelled_by: str = "", **fields) -> dict:
+    """A widget; `number` is its place in the data (hidden ones count as well).
+    It is labelled by the title of its section unless `labelled_by` says
+    otherwise (the sets under the heading of a part)."""
     return node("widget", type=kind, domId=f"s-{section_id}--w{number}",
-                labelledBy=f"s-{section_id}--title", **fields)
+                labelledBy=labelled_by or f"s-{section_id}--title", **fields)
+
+
+def heading(section_id: str, number: int, title: str, eyebrow: str = "") -> dict:
+    """The heading of a part of a section."""
+    return widget("heading", section_id, number, titleId=f"s-{section_id}--w{number}--title",
+                  title=title, eyebrow=eyebrow)
 
 
 def dish(name: str, ingredients: str = "", *, allergens: tuple = (), tags: str = "",
@@ -207,12 +219,13 @@ def row(number: int, name: str = "", *, plus_one_of: str = "", role: str = "",
                 tags=list(tags))
 
 
-def sets(widget_dom_id: str, entries: tuple, staff_page: bool) -> list[dict]:
-    """The sets of `entries` for a page; the swaps are for the staff only."""
+def sets(widget_dom_id: str, entries: tuple, staff_page: bool, nested: bool = False) -> list[dict]:
+    """The sets of `entries` for a page; the swaps are for the staff only.
+    `nested`: the widget stands under the heading of a part."""
     return [
         node("set", id=set_id, domId=f"{widget_dom_id}--set-{set_id}", title=title, hint=hint,
              eyebrow=eyebrow, courses=dishes(courses, staff_page), pairing=pairing,
-             swapLines=list(swaps) if staff_page else [])
+             swapLines=list(swaps) if staff_page else [], nested=nested)
         for set_id, title, hint, eyebrow, courses, pairing, swaps in entries
     ]
 
@@ -430,6 +443,40 @@ def guest_pair() -> dict:
     ])
 
 
+#: The texts of the section of short notes: (heading, text).
+INFO = (("Smoking", "Smoking is fine on the terrace by the river."),
+        ("Instant camera", "An instant camera waits at the bar: take a picture and leave it for "
+                           "the couple."))
+
+
+def guest_parts() -> dict:
+    """Nina and her +1: the food in two parts, short notes under headings."""
+    info = []
+    for number, (title, text) in enumerate(INFO):
+        info += [heading("info", 2 * number + 1, title),
+                 widget("text", "info", 2 * number + 2, text=text, variant="body")]
+    return root(staff_page=False, sections=[
+        cover(),
+        section("seats", "Your seats", widgets=[seating(
+            "seats", my_seats=((15, "you"), (16, "plusOne")), seat_label="Seats 15 & 16",
+            who_label="Nina and your guest")]),
+        section("food", "Food", widgets=[
+            heading("food", 1, "Starters", "Shared plates for the table"),
+            widget("dishes", "food", 2, title="", items=dishes(STARTERS[:3], False)),
+            # the dishes on request (3) are for the staff only
+            heading("food", 4, "Main course", "Choose one of two sets"),
+            widget("sets", "food", 5, labelled_by="s-food--w4--title",
+                   items=sets("s-food--w5", SETS, False, nested=True),
+                   note="Your waiter will take your choice after the starters.", count=2,
+                   multiple=True),
+            widget("text", "food", 6, text=ALLERGY_NOTE, variant="card"),
+        ]),
+        section("drinks", "Drinks", widgets=[guest_drinks("drinks", 1)]),
+        section("info", "Good to know", widgets=info),
+        signature(),
+    ])
+
+
 def staff() -> dict:
     """The staff page: every seat and need, the swaps and the notes for the staff."""
     rows = (
@@ -486,6 +533,7 @@ TREES = {
     "guest-plus-one": guest_plus_one,
     "guest-without-table": guest_without_table,
     "guest-pair": guest_pair,
+    "guest-parts": guest_parts,
     "staff": staff,
 }
 

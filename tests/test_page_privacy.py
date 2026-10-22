@@ -2,7 +2,8 @@
 
 A guest page shows the shared parts of the menu and its own record, nothing
 else.  The differential test changes everything a guest must not see (the
-other records, every `staff` key, the requirements and allergens, the
+other records, every `staff` key, the texts of the headings for the staff
+among them, the requirements and allergens, the
 sections and widgets for the staff only, the dish for the staff only, the
 names and dietary notes of the seats, which seats are taken and which are
 reserved) and expects the very same tree of
@@ -191,8 +192,13 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
         for widget in [part] + part.get("widgets", []):
             if widget.get("type") == "text":
                 widget["text"] = "Changed text for the staff"
-            if widget.get("type") == "dishes":
+            if widget.get("type") in ("dishes", "heading"):
                 widget["title"] = "Changed title"
+    # the texts of every heading for the staff
+    for section in menu["sections"]:
+        for widget in section.get("widgets", []):
+            if widget.get("type") == "heading":
+                widget["staff"] = {"title": "Changed heading for the staff", "eyebrow": "Changed eyebrow"}
     for section in menu["sections"]:
         if section.get("type") != "cover":
             section["widgets"].append({"type": "text", "audience": "staff", "text": "Added for the staff"})
@@ -218,7 +224,7 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
         record["seats"] = moved
         record["name"] = f"Other{len(record['token'])}"
         record["token"] = record["token"][::-1] + "-x"
-        record["sections"] = {"main": {"note": "A note of another guest"}}
+        record["sections"] = {"seats": {"note": "A note of another guest"}}
     for record in guests:
         if record.get("staff") is True:
             record["token"] = "Changed-staff-token-0123456789"
@@ -412,7 +418,7 @@ class StructureTest(unittest.TestCase):
             ("_couple", "members"),
         }
         for function in (_page.public_menu, _page._public_widget, _page._public_dish, _page._couple,
-                         _page.own_record, _page._GuestPage):
+                         _page.own_record, _page._GuestPage, _page._parts, _page._heading, _page._set):
             tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
             for node in ast.walk(tree):
                 key = None

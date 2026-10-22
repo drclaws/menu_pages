@@ -27,6 +27,7 @@ WARNINGS = {
     ),
     "reserved19": "",
     "plain": "",
+    "parts": "",
 }
 
 STYLE_PROBLEM = "the attribute 'style' is not allowed (the styles live in assets/app.css)"

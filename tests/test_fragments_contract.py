@@ -323,6 +323,19 @@ class TreeTests(unittest.TestCase):
         self.assertTrue(widgets_of(trees["guest-plus-one"], "drinks")[0]["note"])
         self.assertTrue(widgets_of(trees["staff"], "drinks")[0]["note"])
         self.assertTrue(widgets_of(trees["staff"], "sets")[0]["note"])
+        # the parts of a section: headings with and without an eyebrow, the
+        # set cards under a heading a level lower, labelled by the heading
+        headings = widgets_of(trees["guest-parts"], "heading")
+        self.assertEqual([(item["title"], bool(item["eyebrow"])) for item in headings],
+                         [("Starters", True), ("Main course", True), ("Smoking", False),
+                          ("Instant camera", False)])
+        self.assertEqual([item["titleId"] for item in headings],
+                         [f"{item['domId']}--title" for item in headings])
+        nested = widgets_of(trees["guest-parts"], "sets")[0]
+        self.assertEqual(nested["labelledBy"], "s-food--w4--title")
+        self.assertEqual({item["nested"] for item in nested["items"]}, {True})
+        self.assertEqual({item["nested"] for name, tree in trees.items() if name != "guest-parts"
+                          for widget in widgets_of(tree, "sets") for item in widget["items"]}, {False})
         variants = {widget["variant"] for tree in trees.values()
                     for widget in widgets_of(tree, "text")}
         self.assertEqual(variants, set(T.ENUMS["variant"]))
@@ -878,6 +891,50 @@ class WidgetTests(unittest.TestCase):
                     self.assertIn(' aria-selected="false" tabindex="-1" ', tab)
                     self.assertIn(f'aria-labelledby="{panel_id}--title"', panel)
                     self.assertNotIn("hidden", panel)
+
+    def test_the_heading_of_a_part(self):
+        food = self.section("guest-parts", "food")
+        self.assertIn('<header class="widget heading-widget" id="s-food--w1">\n'
+                      '  <h3 class="heading-widget__title" id="s-food--w1--title">Starters</h3>\n'
+                      '  <p class="section__subtitle heading-widget__eyebrow">Shared plates for the table'
+                      '</p>\n</header>', food)
+        order = [food.index(marker) for marker in ('id="s-food--title"', 'id="s-food--w1--title"',
+                                                   'id="s-food--w2"', 'id="s-food--w4--title"',
+                                                   'id="s-food--w5"', "text-widget--card")]
+        self.assertEqual(order, sorted(order))
+        # a heading without an eyebrow is the title alone
+        info = self.section("guest-parts", "info")
+        self.assertIn('<header class="widget heading-widget" id="s-info--w1">\n'
+                      '  <h3 class="heading-widget__title" id="s-info--w1--title">Smoking</h3>\n'
+                      "</header>", info)
+        self.assertNotIn("heading-widget__eyebrow", info)
+
+    def test_a_set_under_the_heading_of_a_part(self):
+        widget = element(self.pages["guest-parts"], "sets-widget")
+        self.assertEqual(re.findall(r"<(h\d) class=\"sets__title\" id=\"([^\"]+)\">", widget),
+                         [("h4", "s-food--w5--set-a--title"), ("h4", "s-food--w5--set-b--title")])
+        self.assertNotIn("<h3", widget)
+        # the tab list is named by the heading of the part
+        tablist = re.search(r"<div [^>]*data-tabs-tablist[^>]*>", widget).group(0)
+        self.assertIn(' role="tablist" aria-labelledby="s-food--w4--title"', tablist)
+        # outside a part a card has the h3 it always had
+        for name in ("guest-plus-one", "guest-without-table", "guest-pair", "staff"):
+            with self.subTest(page=name):
+                self.assertNotIn('<h4 class="sets__title"', self.pages[name])
+                self.assertIn('<h3 class="sets__title" id="s-main--w1--set-', self.pages[name])
+        # the staff page with the same parts
+        tree = T.staff()
+        main = sections_of(tree, "main")
+        main["widgets"] = [T.heading("main", 1, "Main course", "Two sets · guests choose at the table"),
+                           T.widget("sets", "main", 2, labelled_by="s-main--w1--title",
+                                    items=T.sets("s-main--w2", T.SETS, True, nested=True),
+                                    note="", count=2, multiple=True)]
+        page = render_strict(tree, self.template)
+        self.assertEqual(html_problems(page), [])
+        staff = element(page, "sets-widget")
+        self.assertEqual(len(re.findall(r'<h4 class="sets__title"', staff)), 2)
+        self.assertIn('aria-labelledby="s-main--w1--title"', staff)
+        self.assertEqual(Outline(page).headings.count(4), 2)
 
     def test_a_single_set_has_no_tabs(self):
         widget = element(self.pages["guest-pair"], "sets-widget")

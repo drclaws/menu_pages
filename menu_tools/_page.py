@@ -16,6 +16,14 @@ never reach the code of a guest page.  The staff page reads the whole menu
 and the records without their tokens and notes.  No page holds a token: the
 token of a record names the directory of its page and nothing else.
 
+A heading widget is the head of a part of its section: the widgets after it
+on the same page, up to the next heading.  A heading with no other widget
+under it on a page is left out of that page, so a section that keeps only
+headings is empty there.  A guest page shows the texts of a heading outside
+its `staff` key, the staff page those under it when they are set.  A set
+card under a heading has the heading level below it (`nested`), and its tab
+list is labelled by the heading.
+
 The words that are joined with numbers and names come from
 `menu_tools._words`; the scheme of the table is the object of
 `menu_tools._table` (`guest_scheme`, `staff_scheme`).
@@ -42,6 +50,8 @@ MARKS = (MARK_YOU, MARK_PLUS_ONE, MARK_NONE)
 DEFAULT_VARIANT = "body"
 DEFAULT_LAYOUT = "list"
 INLINE_LAYOUT = "inline"
+#: The widget that heads a part of a section.
+HEADING = "heading"
 STAFF_FIELDS = ("updated", "contact", "reminder")
 
 
@@ -141,7 +151,12 @@ def _dish(dish: dict) -> dict:
     }
 
 
-def _set(set_id: str, item: dict, widget_dom_id: str, courses: list[dict], swap_lines: list[str]) -> dict:
+def _set(
+    set_id: str, item: dict, widget_dom_id: str, courses: list[dict], swap_lines: list[str], nested: bool
+) -> dict:
+    """A set card; `nested`: it stands under the heading of a part (its own
+    title is a level lower).  The flag is on every card: the fragment reads
+    the cards, not the widget."""
     return {
         "id": set_id,
         "domId": f"{widget_dom_id}--set-{set_id}",
@@ -151,7 +166,26 @@ def _set(set_id: str, item: dict, widget_dom_id: str, courses: list[dict], swap_
         "courses": courses,
         "pairing": _text(item.get("pairing")),
         "swapLines": swap_lines,
+        "nested": nested,
     }
+
+
+def _parts(shown: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """The widgets a page shows of a section, (position in the data, widget)
+    in their order, without the headings nothing stands under: a heading
+    followed by another heading or by the end of the section."""
+    kept = []
+    for at, (position, widget) in enumerate(shown):
+        if widget["type"] == HEADING:
+            following = shown[at + 1][1] if at + 1 < len(shown) else None
+            if following is None or following["type"] == HEADING:
+                continue
+        kept.append((position, widget))
+    return kept
+
+
+def _heading(base: dict, title: str, eyebrow: str) -> dict:
+    return {**base, "titleId": f"{base['domId']}--title", "title": title, "eyebrow": eyebrow}
 
 
 def _seating(base: dict) -> dict:
@@ -229,6 +263,8 @@ def _public_widget(menu: dict, widget: dict, public: dict) -> dict:
     item: dict[str, Any] = {"type": kind, "id": widget.get("id"), "visible": widget.get("visible", True)}
     if kind == "text":
         item.update(text=widget["text"], variant=widget.get("variant", DEFAULT_VARIANT))
+    elif kind == HEADING:
+        item.update(title=widget["title"], eyebrow=_text(widget.get("eyebrow")))
     elif kind == "seating":
         item["showScheme"] = widget.get("showScheme", True)
     elif kind == "dishes":
@@ -332,15 +368,19 @@ class _GuestPage:
         if not (section["visible"] if visible is None else visible):
             return None
         switches = override.get("widgets", {})
+        shown = []
         for position, widget in enumerate(section["widgets"], start=1):
             if widget is None:
                 continue
-            shown = switches.get(widget["id"]) if widget["id"] is not None else None
-            if not (widget["visible"] if shown is None else shown):
-                continue
-            built = self.widget(widget, f"{tree['domId']}--w{position}", tree["titleId"])
-            if built is not None:
-                tree["widgets"].append(built)
+            switch = switches.get(widget["id"]) if widget["id"] is not None else None
+            if widget["visible"] if switch is None else switch:
+                shown.append((position, widget))
+        heading = None  # the title of the part the widgets stand in
+        for position, widget in _parts(shown):
+            dom_id = f"{tree['domId']}--w{position}"
+            if widget["type"] == HEADING:
+                heading = f"{dom_id}--title"
+            tree["widgets"].append(self.widget(widget, dom_id, tree["titleId"], heading))
         tree["note"] = override.get("note", "")
         if not tree["widgets"] and not tree["note"]:
             return None
@@ -350,12 +390,16 @@ class _GuestPage:
         tree["eyebrow"] = section["eyebrow"]
         return tree
 
-    def widget(self, widget: dict, dom_id: str, labelled_by: str) -> dict | None:
+    def widget(self, widget: dict, dom_id: str, labelled_by: str, heading: str | None = None) -> dict:
+        """The node of a widget; `heading`: the title id of the part it
+        stands in, None outside a part."""
         kind = widget["type"]
         base = {"type": kind, "domId": dom_id, "labelledBy": labelled_by}
         public = self.public
         if kind == "text":
             return {**base, "text": widget["text"], "variant": widget["variant"]}
+        if kind == HEADING:
+            return _heading(base, widget["title"], widget["eyebrow"])
         if kind == "seating":
             return self.seating(widget, base)
         if kind == "dishes":
@@ -369,8 +413,9 @@ class _GuestPage:
                 self.usage.sets.add(set_id)
                 self.usage.dishes.update(entry["courses"])
                 courses = [_dish(public["dishes"][dish_id]) for dish_id in entry["courses"]]
-                items.append(_set(set_id, entry, dom_id, courses, []))
-            return {**base, "items": items, "note": widget["note"], "count": len(items), "multiple": len(items) > 1}
+                items.append(_set(set_id, entry, dom_id, courses, [], heading is not None))
+            return {**base, "labelledBy": heading or labelled_by, "items": items, "note": widget["note"],
+                    "count": len(items), "multiple": len(items) > 1}
         if kind == "drinks":
             groups = []
             for group in widget["groups"]:
@@ -515,15 +560,20 @@ class _StaffPage:
             return None
         if section.get("visible", True) is False and section["id"] not in self.switched_sections:
             return None
+        shown = []
         for position, widget in enumerate(section["widgets"], start=1):
             if _audience(widget) == "guest":
                 continue
             switched = (section["id"], widget.get("id")) in self.switched_widgets
             if widget.get("visible", True) is False and not switched:
                 continue
-            built = self.widget(widget, f"{tree['domId']}--w{position}", tree["titleId"])
-            if built is not None:
-                tree["widgets"].append(built)
+            shown.append((position, widget))
+        heading = None  # the title of the part the widgets stand in
+        for position, widget in _parts(shown):
+            dom_id = f"{tree['domId']}--w{position}"
+            if widget["type"] == HEADING:
+                heading = f"{dom_id}--title"
+            tree["widgets"].append(self.widget(widget, dom_id, tree["titleId"], heading))
         if not tree["widgets"]:
             return None
         staff = section.get("staff") or {}
@@ -534,13 +584,21 @@ class _StaffPage:
         tree["eyebrow"] = _text(staff.get("eyebrow")) or _text(section.get("eyebrow"))
         return tree
 
-    def widget(self, widget: dict, dom_id: str, labelled_by: str) -> dict | None:
+    def widget(self, widget: dict, dom_id: str, labelled_by: str, heading: str | None = None) -> dict:
+        """The node of a widget; `heading`: the title id of the part it
+        stands in, None outside a part."""
         kind = widget["type"]
         base = {"type": kind, "domId": dom_id, "labelledBy": labelled_by}
         menu = self.menu
         staff = widget.get("staff") or {}
         if kind == "text":
             return {**base, "text": widget["text"], "variant": widget.get("variant", DEFAULT_VARIANT)}
+        if kind == HEADING:
+            return _heading(
+                base,
+                _text(staff.get("title")) or widget["title"],
+                _text(staff.get("eyebrow")) or _text(widget.get("eyebrow")),
+            )
         if kind == "seating":
             return self.seating(widget, base)
         if kind == "dishes":
@@ -566,12 +624,13 @@ class _StaffPage:
                     for position, (seats, requirement_id, text) in enumerate(found)
                 ]
                 courses = [self.dish(dish_id) for dish_id in entry["courses"]]
-                items.append(_set(set_id, entry, dom_id, courses, lines))
+                items.append(_set(set_id, entry, dom_id, courses, lines, heading is not None))
                 self.usage.sets.add(set_id)
                 self.usage.dishes.update(entry["courses"])
                 self.usage.staff_dishes.update(entry["courses"])
             note = _text(staff.get("note"))
-            return {**base, "items": items, "note": note, "count": len(items), "multiple": len(items) > 1}
+            return {**base, "labelledBy": heading or labelled_by, "items": items, "note": note,
+                    "count": len(items), "multiple": len(items) > 1}
         if kind == "drinks":
             listed = []
             drinks = menu["drinks"]

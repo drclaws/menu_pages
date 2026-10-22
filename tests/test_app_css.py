@@ -299,14 +299,26 @@ class MenuStylesTest(unittest.TestCase):
 
     def test_print_of_the_staff_page_is_compact(self):
         self.assertEqual(self.print[".menu--staff .section"], "margin-block: var(--space-md);")
+        # a part after another one: the step of the sections, not the larger one of the screen
+        self.assertEqual(self.print[".menu--staff .section__body > * + .heading-widget"],
+                         "margin-block-start: var(--space-md);")
         self.assertEqual(self.print[".seat-table td"], "padding-block: var(--space-3xs);")
         self.assertEqual(self.print[".seat-number"], "padding-block: 0;")
         self.assertEqual(self.print[".seat-table tr"], "break-inside: avoid;")
         self.assertEqual(self.print[".sets__panel"], "break-inside: avoid;")
 
     def test_print_keeps_the_head_of_a_section_with_what_follows(self):
-        # both: with `break-after` alone a browser splits the eyebrow from the title
-        self.assertEqual(self.print[".section__head"], "break-inside: avoid; break-after: avoid;")
+        # both: with `break-after` alone a browser splits the eyebrow from the
+        # title; the heading of a part is kept with its part the same way
+        self.assertEqual(self.print[".section__head, .heading-widget"], "break-inside: avoid; break-after: avoid;")
+
+    def test_the_heading_of_a_part_is_a_component(self):
+        self.assertEqual(self.components[".heading-widget__title"], "font-size: var(--text-lg);")
+        self.assertEqual(self.components[".heading-widget .heading-widget__eyebrow"],
+                         "margin-block: var(--space-2xs) 0;")
+        # a part after another one stands a larger step apart
+        self.assertEqual(self.components[".section__body > * + .heading-widget"],
+                         "margin-block-start: var(--space-xl);")
 
     def test_print_drops_the_shadows_of_the_cards(self):
         # a browser prints the blur of a rounded card as a grey rectangle

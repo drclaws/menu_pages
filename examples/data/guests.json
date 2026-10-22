@@ -138,7 +138,7 @@
       }
     ],
     "sections": {
-      "main": {
+      "food": {
         "widgets": {
           "allergy-card": {
             "visible": false

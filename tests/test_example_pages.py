@@ -77,9 +77,17 @@ class ExampleDataTest(unittest.TestCase):
         widget_types = {widget["type"] for section in menu["sections"] for widget in section.get("widgets", [])}
         self.assertEqual(widget_types, set(_schema.WIDGET_TYPES))
         self.assertEqual(len(menu["reservedSeats"]), 1)
-        self.assertEqual({tuple(item.get("audience", "all") for item in section.get("widgets", []))
-                          for section in menu["sections"] if section["id"] in ("starters", "drinks")},
-                         {("all", "staff"), ("guest", "staff")})
+        sections = {section["id"]: section for section in menu["sections"]}
+        self.assertEqual([tuple(item.get("audience", "all") for item in sections[name]["widgets"])
+                          for name in ("food", "drinks")],
+                         [("all", "all", "staff", "all", "all", "guest"), ("guest", "staff")])
+        # the food in two parts under their headings, short texts under headings after the drinks
+        self.assertEqual([item["type"] for item in sections["food"]["widgets"]],
+                         ["heading", "dishes", "dishes", "heading", "sets", "text"])
+        self.assertEqual([item["type"] for item in sections["info"]["widgets"]],
+                         ["heading", "text", "heading", "text"])
+        self.assertEqual([section["id"] for section in menu["sections"]],
+                         ["cover", "seats", "food", "drinks", "info", "signature"])
         records = [record for record in guests if record.get("staff") is not True]
         seats = [record["seats"] for record in records]
         total = sum(1 for arm in menu["table"]["seats"] for _ in range(arm.get("count", 1)))
@@ -136,6 +144,36 @@ class ExamplePagesTest(unittest.TestCase):
                     self.assertTrue(addresses)
                     for address in addresses:
                         self.assertTrue(address.startswith(ASSETS_PREFIX), address)
+
+    def test_the_headings_have_no_gaps(self):
+        # h1 the cover, h2 a section, h3 the heading of a part and a set
+        # outside a part, h4 a set inside a part
+        for name, (_out, _menu, _guests, pages, _staff) in self.built.items():
+            for token, page in pages.items():
+                levels = [int(level) for level in re.findall(r"<h([1-6])[\s>]", page)]
+                with self.subTest(set=name, page=token):
+                    self.assertEqual(levels.count(1), 1)
+                    self.assertEqual(levels[0], 1)
+                    for previous, level in zip(levels, levels[1:]):
+                        self.assertLessEqual(level, previous + 1)
+
+    def test_the_food_of_the_main_set_is_one_section_of_two_parts(self):
+        _out, _menu, _guests, pages, _staff = self.built["data"]
+        for token, page in pages.items():
+            food = re.search(r'<section class="section" id="s-food".*?</section>', page, re.S).group(0)
+            with self.subTest(page=token):
+                self.assertEqual(re.findall(r"<h3 [^>]*>([^<]*)</h3>", food), ["Starters", "Main course"])
+                self.assertEqual(re.findall(r'<h4 class="sets__title"[^>]*>([^<]*)</h4>', food), ["Set A", "Set B"])
+                self.assertNotIn("<h3 class=\"sets__title\"", food)
+                self.assertIn('aria-labelledby="s-food--w4--title"', food)
+                info = re.search(r'<section class="section" id="s-info".*?</section>', page, re.S).group(0)
+                self.assertEqual(re.findall(r"<h3 [^>]*>([^<]*)</h3>", info), ["Smoking", "Instant camera"])
+        # the eyebrows of the staff page are its own
+        staff = pages[self.built["data"][4]]
+        self.assertIn("Shared plates · on the table by 19:15", staff)
+        guest = pages[self.built["data"][2][0]["token"]]
+        self.assertIn("Shared plates for the table", guest)
+        self.assertNotIn("on the table by 19:15", guest)
 
     def test_the_table_plan_is_drawn_where_there_is_a_table(self):
         for name, (_out, menu, _guests, pages, staff) in self.built.items():

@@ -9,12 +9,14 @@ Privacy by construction.  A guest page is built from two projections only:
 `public_menu` (the shared texts outside the `staff` keys and outside the
 parts for the staff only, the names and ingredients of the dishes the guests
 see, their sets and the guest fields of their drinks, the label and the seats
-of the couple, the table) and `own_record` (the name, the seat numbers and
-which of them a companion takes, the switches and notes of the sections).
-Tokens, other records, requirements, allergens and the names of the seats
-never reach the code of a guest page.  The staff page reads the whole menu
-and the records without their tokens and notes.  No page holds a token: the
-token of a record names the directory of its page and nothing else.
+of the couple, the table) and `own_record` (the name, the seat numbers, which
+of them a companion takes and the name of that companion, the switches and
+notes of the sections).  The names of the companions of the own record are
+in the label of its seats (`whoLabel`) and nowhere else on the page.
+Tokens, other records, requirements, allergens and the names of the other
+seats never reach the code of a guest page.  The staff page reads the whole
+menu and the records without their tokens and notes.  No page holds a token:
+the token of a record names the directory of its page and nothing else.
 
 The line of the sections at the top of a page (`nav` of the root) links the
 sections of that page that have a label (`nav` of a section), in their
@@ -329,8 +331,11 @@ def _public_dish(menu: dict, dish_id: str, public: dict) -> None:
 def own_record(record: dict) -> dict:
     """The part of a record its own page is built from.
 
-    The token, the names of the seats and their requirements are left out:
-    the page of a guest shows none of them (a companion is "your guest").
+    The token, the requirements of the seats and the names of the seats
+    other than the companions are left out: the page of a guest shows none
+    of them.  `companion` of a seat is the name of the companion on a +1
+    seat ("" without one, and on every other seat): the label of the seats
+    names the companion by it, or "your guest" when it is empty.
     """
     sections = {}
     for section_id, override in (record.get("sections") or {}).items():
@@ -345,7 +350,11 @@ def own_record(record: dict) -> dict:
     return {
         "name": record["name"],
         "seats": [
-            {"number": seat["number"], "plusOne": seat.get("plusOne") is True}
+            {
+                "number": seat["number"],
+                "plusOne": seat.get("plusOne") is True,
+                "companion": _text(seat.get("name")) if seat.get("plusOne") is True else "",
+            }
             for seat in record["seats"]
         ],
         "sections": sections,
@@ -455,6 +464,7 @@ class _GuestPage:
         seats = self.own["seats"]
         numbers = [seat["number"] for seat in seats]
         plus_ones = [seat["number"] for seat in seats if seat["plusOne"]]
+        companions = [seat["companion"] for seat in seats if seat["plusOne"]]
         marked = len(seats) <= MAX_MARKED_SEATS
 
         def mark(position: int, seat: dict) -> str:
@@ -468,7 +478,7 @@ class _GuestPage:
         tree = _seating(base)
         tree["mySeats"] = sorted(mine, key=lambda item: item["number"])
         tree["seatLabel"] = _words.seat_label(numbers)
-        tree["whoLabel"] = _words.who_label(self.own["name"], len(plus_ones))
+        tree["whoLabel"] = _words.who_label(self.own["name"], companions)
         table = self.public["table"]
         if table is not None and widget["showScheme"]:
             tree["scheme"] = _table.guest_scheme(

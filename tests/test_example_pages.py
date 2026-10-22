@@ -202,6 +202,39 @@ class ExamplePagesTest(unittest.TestCase):
         self.assertIn("Shared plates for the table", guest)
         self.assertNotIn("on the table by 19:15", guest)
 
+    def test_the_label_of_the_seats_names_the_companions_with_a_name(self):
+        expected = {
+            "data": {"Greta": "Greta and Hugo", "Trent": "Trent and Oscar", "Heidi": "Heidi and your guest",
+                     "Peggy and Walter": "Peggy and Walter", "Rupert": "Rupert"},
+            "data-plain": {"Astrid": "Astrid and your guest", "Ezra": "Ezra"},
+        }
+        for name, (_out, _menu, guests, pages, _staff) in self.built.items():
+            tokens = {record.get("name"): record["token"] for record in guests}
+            for person, label in expected[name].items():
+                with self.subTest(set=name, record=person):
+                    self.assertEqual(re.findall(r'<span class="seating__who">([^<]*)</span>', pages[tokens[person]]),
+                                     [label])
+
+    def test_the_table_of_the_seats_names_the_companions_with_a_name(self):
+        # a +1 with a name: the name first, in bold, without "+1"; without
+        # one: "+1", whose guest it is and a placeholder
+        expected = {
+            "data": {1: "1 Hugo · Greta’s guest", 9: "9 +1 · Heidi’s guest, [name]", 16: "16 Oscar · Trent’s guest",
+                     2: "2 Peggy"},
+            "data-plain": {3: "3 +1 · Astrid’s guest, [name]", 2: "2 Astrid"},
+        }
+        for name, (_out, _menu, _guests, pages, staff) in self.built.items():
+            table = re.search(r'<table class="seat-table">.*?</table>', pages[staff], re.S).group(0)
+            rows = {}
+            for row in re.findall(r"<tr>\s*<td.*?</tr>", table, re.S):
+                text = " ".join(re.sub(r"<[^>]+>", " ", row).split())
+                rows[int(text.split()[0])] = (text, row)
+            for number, line in expected[name].items():
+                with self.subTest(set=name, seat=number):
+                    text, row = rows[number]
+                    self.assertEqual(text, line)
+                    self.assertIn(f'<span class="seat-table__name">{line.split()[1]}</span>', row)
+
     def test_the_table_plan_is_drawn_where_there_is_a_table(self):
         for name, (_out, menu, _guests, pages, staff) in self.built.items():
             for token, page in pages.items():

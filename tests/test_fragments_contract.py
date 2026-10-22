@@ -834,7 +834,8 @@ class WidgetTests(unittest.TestCase):
     def test_the_seats_of_a_guest(self):
         cases = {"guest-plus-one": ("Seats 8 &amp; 9", "Olga and your guest"),
                  "guest-without-table": ("Seat 1", "Klara"),
-                 "guest-pair": ("Seats 12 &amp; 13", "Peggy and Victor")}
+                 "guest-pair": ("Seats 12 &amp; 13", "Peggy and Victor"),
+                 "guest-parts": ("Seats 15 &amp; 16", "Nina and Oscar")}
         for name, (seats, who) in cases.items():
             section = self.section(name, "seats")
             with self.subTest(page=name):
@@ -865,7 +866,11 @@ class WidgetTests(unittest.TestCase):
         self.assertEqual(text[8], "9 +1 · Olga’s guest, [name]")
         self.assertEqual(text[9], "10 Egor no gluten no lactose")
         self.assertEqual(text[10], "11 —")
-        self.assertEqual(text[15], "16 +1 · Nina’s guest, Oscar")
+        # a +1 with a name: the name in bold, as every guest, and no "+1"
+        self.assertEqual(text[15], "16 Oscar · Nina’s guest")
+        self.assertIn('<span class="seat-table__name">Oscar</span>\n'
+                      '        <span class="seat-table__role">· Nina’s guest</span>', rows[15])
+        self.assertIn('<span class="seat-table__name">+1</span>', rows[8])
         self.assertIn('<span class="seat-number seat-number--couple">4</span>', rows[3])
         self.assertIn('<span class="seat-number">3</span>', rows[2])
         self.assertEqual(re.findall(r'<li class="pill pill--flag">([^<]*)</li>', rows[9]),

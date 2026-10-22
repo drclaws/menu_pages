@@ -12,8 +12,12 @@ the SVG `viewBox`) and an ordered list of seats, each on one side of an arm::
 The number of a seat is its position in the expanded list of seats (`count`
 repeats an item).  The seats of a side are spread evenly and centred on the
 free part of the side, clockwise; `arms[].shift` moves the group of a side
-along it.  The couple (their seats, label and arm) is a separate part of the
-menu data and comes in as parameters.
+along it.  `seats[].align` lines seats up with other seats: an element per
+seat of the item, the number of another seat or null; such a seat takes the
+coordinate of that seat along its own side (x on the top and the bottom, y
+on the left and the right), and the other seats of its side are laid out
+around it (see `_place`).  The couple (their seats, label and arm) is a
+separate part of the menu data and comes in as parameters.
 
 Every coordinate is computed in whole half pixels (ints) and every number of
 the output is a string ("66", "66.5"), so the result does not depend on the
@@ -101,7 +105,7 @@ ANCHORS = ("start", "end", "middle")
 
 _TABLE_FIELDS = ("arms", "label", "seats")
 _ARM_FIELDS = ("height", "id", "shift", "width", "x", "y")
-_SEAT_FIELDS = ("arm", "count", "side")
+_SEAT_FIELDS = ("align", "arm", "count", "side")
 _ID_RE = re.compile(r"[a-z][a-z0-9-]{0,39}")
 _ID_RULE = "an id: a-z, 0-9 and '-', starting with a letter, at most 40 characters"
 _OUTWARD = {"top": (0, -1), "right": (1, 0), "bottom": (0, 1), "left": (-1, 0)}
@@ -161,6 +165,7 @@ class _Parsed(NamedTuple):
     ids: dict  # id -> position of the arm
     specs: list  # (arm id, side, item) per seat number
     total: int | None
+    targets: list  # the seat each seat aligns to (or None), per seat number
 
 
 class _Plan(NamedTuple):
@@ -235,6 +240,13 @@ def _seat_where(seat: _Seat) -> str:
     return f"table.seats[{seat.item}] (seat {seat.number})"
 
 
+def _align_where(specs: Sequence[tuple], number: int) -> str:
+    """The element of `align` that belongs to a seat: its item and position."""
+    item = specs[number - 1][2]
+    first = next(n for n, spec in enumerate(specs, 1) if spec[2] == item)
+    return f"table.seats[{item}].align[{number - first}] (seat {number})"
+
+
 def _seat_numbers(value: Any) -> list | None:
     """A list of ints from a sequence of ints, or None."""
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -258,8 +270,10 @@ def _parse(table: Any, errors: list[str]) -> _Parsed | None:
     if not _one_line(label):
         errors.append("table.label: expected a non-empty one-line string")
     arms, ids = _parse_arms(table.get("arms"), errors)
-    specs, total = _parse_seats(table.get("seats"), ids, errors)
-    return _Parsed(label, arms, ids, specs, total)
+    specs, total, targets = _parse_seats(table.get("seats"), ids, errors)
+    if total is not None:
+        errors.extend(_check_targets(specs, targets, total, ids))
+    return _Parsed(label, arms, ids, specs, total, targets)
 
 
 def _parse_arms(raw: Any, errors: list[str]) -> tuple[list, dict]:
@@ -329,11 +343,12 @@ def _parse_shift(item: dict, where: str, errors: list[str]) -> dict | None:
     return {side: shift[side] for side in SIDES if side in shift} if good else None
 
 
-def _parse_seats(raw: Any, ids: dict, errors: list[str]) -> tuple[list, int | None]:
+def _parse_seats(raw: Any, ids: dict, errors: list[str]) -> tuple[list, int | None, list]:
     specs: list[tuple[Any, Any, int]] = []
+    targets: list[int | None] = []
     if not isinstance(raw, list) or not raw:
         errors.append("table.seats: expected a non-empty array")
-        return specs, None
+        return specs, None, targets
     number = 1
     known = True
     for index, item in enumerate(raw):
@@ -353,17 +368,68 @@ def _parse_seats(raw: Any, ids: dict, errors: list[str]) -> tuple[list, int | No
         if count is None:
             errors.append(f"{where}.count ({seats}): expected an integer from 1 to {MAX_COUNT}")
             known = False
-            count = 1
         arm_id, side = item.get("arm"), item.get("side")
         if not isinstance(arm_id, str) or arm_id not in ids:
             errors.append(f"{where}.arm ({seats}): not an id of table.arms")
         if not isinstance(side, str) or side not in SIDES:
             errors.append(f"{where}.side ({seats}): expected one of {', '.join(SIDES)}")
+        targets.extend(_parse_align(item, where, number, count, errors))
+        count = count or 1
         specs.extend((arm_id, side, index) for _ in range(count))
         number += count
     if number - 1 > MAX_SEATS:
         errors.append(f"table.seats: at most {MAX_SEATS} seats")
-    return specs, (number - 1 if known else None)
+    return specs, (number - 1 if known else None), targets
+
+
+def _parse_align(item: dict, where: str, first: int, count: int | None, errors: list[str]) -> list:
+    """The seats that the seats of an item align to (None: not aligned), one
+    per seat; `count` is None when the count of the item is wrong."""
+    targets: list[int | None] = [None] * (count or 1)
+    if "align" not in item:
+        return targets
+    value = item["align"]
+    where = f"{where}.align"
+    if count is None:
+        if not isinstance(value, list):
+            errors.append(f"{where} ({_item_text(first, None)}): expected an array: "
+                          "a seat number or null for each seat")
+        return targets
+    if not isinstance(value, list) or len(value) != count:
+        wanted = "one element: a seat number or null" if count == 1 else (
+            f"{count} elements: a seat number or null for each seat"
+        )
+        errors.append(f"{where} ({_item_text(first, count)}): expected an array of {wanted}")
+        return targets
+    for j, element in enumerate(value):
+        if element is None:
+            continue
+        if _is_int(element) and element >= 1:
+            targets[j] = element
+        else:
+            errors.append(f"{where}[{j}] (seat {first + j}): expected a seat number or null")
+    return targets
+
+
+def _check_targets(specs: Sequence[tuple], targets: Sequence, total: int, ids: dict) -> list[str]:
+    """The seats that seats align to: seats of the table, of another side."""
+    errors = []
+    for number, target in enumerate(targets, 1):
+        if target is None:
+            continue
+        where = _align_where(specs, number)
+        if target > total:
+            errors.append(f"{where}: refers to no seat: the table has {total} seats")
+        elif target == number:
+            errors.append(f"{where}: refers to the seat itself")
+        else:
+            arm_id, side, _item = specs[number - 1]
+            if (
+                isinstance(arm_id, str) and arm_id in ids and side in SIDES
+                and specs[target - 1][:2] == (arm_id, side)
+            ):
+                errors.append(f"{where}: refers to seat {target} on the same side of the same arm")
+    return errors
 
 
 # --------------------------------------------------------------------------
@@ -446,24 +512,162 @@ def _pitch(count: int, free: int) -> int:
     return min(2 * SEAT_PITCH, (2 * free - 2 * SEAT_DIAMETER) // (count - 1))
 
 
-def _place(specs: Sequence[tuple], arms: Sequence[_Arm]) -> list[_Seat]:
+def _clockwise(side: str) -> int:
+    """1 where the seats go clockwise along the axis (top, right), else -1."""
+    return 1 if side in ("top", "right") else -1
+
+
+def _align_links(specs: Sequence[tuple], targets: Sequence) -> dict:
+    """Seat -> the seats its place depends on: an aligned seat depends on the
+    seat it aligns to, another seat of a side with aligned seats on the
+    aligned seats next to it on the side (one or two)."""
+    links: dict[int, list[int]] = {}
+    for numbers in _groups(specs).values():
+        anchors = [k for k, number in enumerate(numbers) if targets[number - 1] is not None]
+        for k, number in enumerate(numbers):
+            if targets[number - 1] is not None:
+                links[number] = [targets[number - 1]]
+            else:
+                before = [numbers[i] for i in anchors if i < k][-1:]
+                after = [numbers[i] for i in anchors if i > k][:1]
+                links[number] = before + after
+    return links
+
+
+def _align_order(specs: Sequence[tuple], targets: Sequence) -> tuple[list, list]:
+    """The seats in an order in which every seat comes after the seats its
+    place depends on, and the circles of these links (lists of seats)."""
+    links = _align_links(specs, targets)
+    order: list[int] = []
+    circles: list[list[int]] = []
+    done: dict[int, bool] = {}  # False while the seat is on the current path
+    for start in range(1, len(specs) + 1):
+        if start in done:
+            continue
+        done[start] = False
+        path, stack = [start], [iter(links[start])]
+        while stack:
+            following = next(stack[-1], None)
+            if following is None:
+                stack.pop()
+                number = path.pop()
+                done[number] = True
+                order.append(number)
+            elif following not in done:
+                done[following] = False
+                path.append(following)
+                stack.append(iter(links[following]))
+            elif not done[following]:
+                circles.append(path[path.index(following):])
+    return order, circles
+
+
+def _check_circles(specs: Sequence[tuple], targets: Sequence) -> list[str]:
+    """Seats that align to each other in a circle (through the other seats of
+    a side, which follow its aligned seats)."""
+    errors = []
+    seen = set()
+    for circle in _align_order(specs, targets)[1]:
+        numbers = sorted(circle)
+        if tuple(numbers) in seen:
+            continue
+        seen.add(tuple(numbers))
+        first = min(number for number in circle if targets[number - 1] is not None)
+        errors.append(
+            f"{_align_where(specs, first)}: the alignment goes round in a circle "
+            f"through {_numbers_text(numbers)}"
+        )
+    return errors
+
+
+def _place(specs: Sequence[tuple], arms: Sequence[_Arm], targets: Sequence) -> list[_Seat]:
+    """The seat centres.
+
+    The seats of a side without aligned seats are spread evenly and centred
+    on its free part, at the pitch of 42 px or squeezed so that the outer
+    seats keep 15 px (a seat radius) from its ends, and moved by the shift of
+    the side.  On a side with aligned seats each of them takes the coordinate
+    of the seat it aligns to along the side; the seats between two aligned
+    seats are spread evenly between them; those before the first and after
+    the last one follow it at the pitch of 42 px outwards or, when they would
+    come closer than 15 px to the end of the free part, are spread evenly
+    between that point and the aligned seat.  The shift of such a side has no
+    effect.  The circles of alignments are checked before.
+    """
     by_id = {arm.id: arm for arm in arms}
-    centres: dict[int, _Seat] = {}
+    along: dict[int, int] = {}  # seat -> its centre along its side, half px
+    lines: dict[int, int] = {}  # seat -> the centre line of its side, half px
+    aligned: dict[int, tuple] = {}  # seat -> its side with aligned seats
     for (arm_id, side), numbers in _groups(specs).items():
         arm = by_id[arm_id]
         (a, b), = _free_parts(arm, side, arms)
+        for number in numbers:
+            lines[number] = 2 * _centre_line(arm, side)
+        anchors = [k for k, number in enumerate(numbers) if targets[number - 1] is not None]
+        if anchors:
+            for number in numbers:
+                aligned[number] = (numbers, anchors, side, a, b)
+            continue
         count = len(numbers)
         pitch = _pitch(count, b - a)
         start = (2 * (a + b) - (count - 1) * pitch) // 2 + 2 * arm.shift.get(side, 0)
-        line = 2 * _centre_line(arm, side)
         for k, number in enumerate(numbers):
             # clockwise: top left to right, right downwards, bottom right to
             # left, left upwards
             slot = k if side in ("top", "right") else count - 1 - k
-            along = start + slot * pitch
-            cx, cy = (along, line) if side in ("top", "bottom") else (line, along)
-            centres[number] = _Seat(number, specs[number - 1][2], arm, side, cx, cy)
-    return [centres[number] for number in range(1, len(specs) + 1)]
+            along[number] = start + slot * pitch
+
+    def centre(number: int) -> tuple[int, int]:
+        if specs[number - 1][1] in ("top", "bottom"):
+            return along[number], lines[number]
+        return lines[number], along[number]
+
+    for number in _align_order(specs, targets)[0]:
+        if number in along:
+            continue
+        target = targets[number - 1]
+        if target is None:
+            along.update(_spread(number, aligned[number], along))
+        else:
+            cx, cy = centre(target)
+            along[number] = cx if specs[number - 1][1] in ("top", "bottom") else cy
+    return [
+        _Seat(number, item, by_id[arm_id], side, *centre(number))
+        for number, (arm_id, side, item) in enumerate(specs, 1)
+    ]
+
+
+def _spread(number: int, side_info: tuple, along: dict) -> dict:
+    """The places (half px along the side) of the seats without alignment
+    next to `number` on a side with aligned seats, between two aligned seats
+    or before the first or after the last one."""
+    numbers, anchors, side, a, b = side_info
+    sign = _clockwise(side)
+    # clockwise coordinates: the seats of the side come in increasing order
+    low, high = sorted((sign * 2 * a, sign * 2 * b))
+    low, high = low + SEAT_DIAMETER, high - SEAT_DIAMETER  # 15 px from the ends
+    k = numbers.index(number)
+    before = [i for i in anchors if i < k][-1:]
+    after = [i for i in anchors if i > k][:1]
+    # only these aligned seats are placed already
+    place = {i: sign * along[numbers[i]] for i in before + after}
+    pitch = 2 * SEAT_PITCH
+    if before and after:
+        p, q = before[0], after[0]
+        span = place[q] - place[p]
+        run = {i: place[p] + (i - p) * span // (q - p) for i in range(p + 1, q)}
+    elif after:
+        q = after[0]
+        if place[q] - q * pitch < low:
+            pitch = max(0, (place[q] - low) // q)
+        run = {i: place[q] - (q - i) * pitch for i in range(q)}
+    else:
+        p = before[0]
+        rest = len(numbers) - 1 - p
+        if place[p] + rest * pitch > high:
+            pitch = max(0, (high - place[p]) // rest)
+        run = {i: place[p] + (i - p) * pitch for i in range(p + 1, len(numbers))}
+    return {numbers[i]: sign * value for i, value in run.items()}
 
 
 def _distance2_to_box(cx: int, cy: int, box: _Box) -> int:
@@ -599,22 +803,27 @@ def check_table(table: Any) -> TableCheck:
 
 
 def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
-    """The rules in waves: structure, arms, sides, seats, labels; a wave runs
-    only when the ones before it found no error."""
+    """The rules in waves: structure, circles of alignments, arms, sides,
+    aligned seats, seats, labels; a wave runs only when the ones before it
+    found no error."""
     errors: list[str] = []
     warnings: list[str] = []
     parsed = _parse(table, errors)
     total = parsed.total if parsed else None
     if errors:
         return TableCheck(errors, warnings, total), None
-    arms = parsed.arms
-    errors = _check_arms(arms)
+    arms, specs, targets = parsed.arms, parsed.specs, parsed.targets
+    errors = _check_circles(specs, targets)
     if not errors:
-        errors = _check_sides(parsed.specs, arms, warnings)
+        errors = _check_arms(arms)
+    if not errors:
+        errors = _check_sides(specs, arms, targets, warnings)
     if errors:
         return TableCheck(errors, warnings, total), None
-    seats = _place(parsed.specs, arms)
-    errors = _check_seats(seats, arms)
+    seats = _place(specs, arms, targets)
+    errors = _check_aligned(seats, specs, arms, targets, warnings)
+    if not errors:
+        errors = _check_seats(seats, arms)
     if errors:
         return TableCheck(errors, warnings, total), None
 
@@ -643,8 +852,11 @@ def _check_arms(arms: Sequence[_Arm]) -> list[str]:
     return errors
 
 
-def _check_sides(specs: Sequence[tuple], arms: Sequence[_Arm], warnings: list[str]) -> list[str]:
-    """One free part per side, room for its seats; a squeezed pitch is a warning."""
+def _check_sides(
+    specs: Sequence[tuple], arms: Sequence[_Arm], targets: Sequence, warnings: list[str]
+) -> list[str]:
+    """One free part per side, room for its seats; a squeezed pitch is a
+    warning (on a side with aligned seats it is known only after the layout)."""
     errors = []
     by_id = {arm.id: arm for arm in arms}
     for (arm_id, side), numbers in _groups(specs).items():
@@ -665,8 +877,59 @@ def _check_sides(specs: Sequence[tuple], arms: Sequence[_Arm], warnings: list[st
                     f"{where}: too short for {listed}: "
                     f"{count} seat(s) need {need} px of free length"
                 )
-            elif _pitch(count, b - a) < 2 * SEAT_PITCH:
+            elif _pitch(count, b - a) < 2 * SEAT_PITCH and all(
+                targets[number - 1] is None for number in numbers
+            ):
                 warnings.append(f"{where}: {listed} squeezed closer than {SEAT_PITCH} px")
+    return errors
+
+
+def _check_aligned(
+    seats: Sequence[_Seat],
+    specs: Sequence[tuple],
+    arms: Sequence[_Arm],
+    targets: Sequence,
+    warnings: list[str],
+) -> list[str]:
+    """Each aligned seat on the free part of its side and in the clockwise
+    order of the side; a squeezed pitch on such a side is a warning."""
+    errors: list[str] = []
+    squeezed: list[str] = []
+    by_id = {arm.id: arm for arm in arms}
+    for (arm_id, side), numbers in _groups(specs).items():
+        anchors = [number for number in numbers if targets[number - 1] is not None]
+        if not anchors:
+            continue
+        arm = by_id[arm_id]
+        (a, b), = _free_parts(arm, side, arms)
+        along = {
+            number: seats[number - 1].cx if side in ("top", "bottom") else seats[number - 1].cy
+            for number in numbers
+        }
+        # clockwise coordinates: the seats of the side come in increasing order
+        place = {number: _clockwise(side) * along[number] for number in numbers}
+        inside = []
+        for number in anchors:
+            if 2 * a <= along[number] <= 2 * b:
+                inside.append(number)
+            else:
+                errors.append(
+                    f"{_align_where(specs, number)}: lines the seat up off the free part of its side"
+                )
+        for previous, number in zip(inside, inside[1:]):
+            if place[number] <= place[previous]:
+                errors.append(
+                    f"{_align_where(specs, number)}: puts the seat at or before seat {previous}, "
+                    "against the clockwise order of its side"
+                )
+        gaps = [place[second] - place[first] for first, second in zip(numbers, numbers[1:])]
+        if any(gap < 2 * SEAT_PITCH for gap in gaps):
+            squeezed.append(
+                f"table.arms[{arm.index}] side '{side}': {_numbers_text(numbers)} "
+                f"squeezed closer than {SEAT_PITCH} px"
+            )
+    if not errors:
+        warnings.extend(squeezed)
     return errors
 
 

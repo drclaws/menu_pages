@@ -866,7 +866,11 @@ class WidgetTests(unittest.TestCase):
         self.assertEqual(text[8], "9 +1 · Olga’s guest, [name]")
         self.assertEqual(text[9], "10 Egor no gluten no lactose")
         self.assertEqual(text[10], "11 —")
-        self.assertEqual(text[15], "16 +1 · Nina’s guest, Oscar")
+        # a +1 with a name: the name in bold, as every guest, and no "+1"
+        self.assertEqual(text[15], "16 Oscar · Nina’s guest")
+        self.assertIn('<span class="seat-table__name">Oscar</span>\n'
+                      '        <span class="seat-table__role">· Nina’s guest</span>', rows[15])
+        self.assertIn('<span class="seat-table__name">+1</span>', rows[8])
         self.assertIn('<span class="seat-number seat-number--couple">4</span>', rows[3])
         self.assertIn('<span class="seat-number">3</span>', rows[2])
         self.assertEqual(re.findall(r'<li class="pill pill--flag">([^<]*)</li>', rows[9]),

@@ -463,11 +463,15 @@ def declarations(body: str) -> dict[str, str]:
 class SchemeStylesTest(unittest.TestCase):
     """The table scheme (section 6) and its print (section 8)."""
 
+    #: The colours of the seats of a guest, as the geometry numbers them.
+    COLOURS = ("1", "2", "3")
     #: The parts of the drawing that have rules; seat--regular and seat--none
-    #: are modifiers of the enumerations that need none.
+    #: are modifiers of the enumerations that need none. A colour modifier
+    #: of a seat colours the name of that seat under the scheme too.
     PARTS = (".scheme", ".scheme__table", ".scheme__couple", ".seat__circle", ".seat__number",
              ".seat--couple .seat__circle", ".seat--flagged .seat__circle",
-             ".seat--you .seat__circle", ".seat--you .seat__number", ".seat__ring",
+             *(f".seat--colour-{colour}, .seating__name--colour-{colour}" for colour in COLOURS),
+             ".seat--you .seat__circle", ".seat__ring",
              ".seat-badge__circle", ".seat-badge__letter", ".seat-label", ".seat-label--start",
              ".seat-label--end", ".seat-label--middle")
 
@@ -517,7 +521,8 @@ class SchemeStylesTest(unittest.TestCase):
             for name, value in values.items():
                 with self.subTest(selector=selector, property=name):
                     if name in ("fill", "stroke"):
-                        self.assertRegex(value, r"\Avar\(--color-[\w-]+\)\Z")
+                        # a token, or the colour of the seat set by its modifier
+                        self.assertRegex(value, r"\Avar\((--color-[\w-]+|--seat-colour)\)\Z")
                     if name == "font-size":
                         self.assertRegex(value, r"\Avar\(--scheme-font-[\w-]+\)\Z")
                     if name == "font-weight":
@@ -525,6 +530,26 @@ class SchemeStylesTest(unittest.TestCase):
                                               "var(--scheme-font-weight-strong)"))
         self.assertEqual(self.token("--scheme-font-weight-strong"), "700")
         self.assertEqual(self.scheme[".seat__ring"]["fill-opacity"], "var(--seat-ring-opacity)")
+
+    def test_the_seats_of_a_guest_and_their_names_take_the_colour_of_their_place(self):
+        # a token holds each colour (tests/test_scheme.py ties the tokens to
+        # the colours of the geometry and checks their values)
+        for colour in self.COLOURS:
+            with self.subTest(colour=colour):
+                self.assertEqual(self.scheme[f".seat--colour-{colour}, .seating__name--colour-{colour}"],
+                                 {"--seat-colour": f"var(--color-seat-{colour})"})
+                self.assertIn(f"--color-seat-{colour}:", self.tokens)
+        own = {"fill": "var(--seat-colour)", "stroke": "var(--seat-colour)"}
+        self.assertEqual(self.scheme[".seat--you .seat__circle"], own)
+        self.assertEqual(self.scheme[".seat__ring"]["fill"], "var(--seat-colour)")
+        # "You" stands by the one seat of a record of one seat: the first colour
+        self.assertEqual(self.scheme[".seat-label"]["fill"], "var(--color-seat-1)")
+        # the guest page prints no numbers: no rule for a number of a guest's seat
+        self.assertNotIn(".seat--you .seat__number", self.scheme)
+        name = declarations(rules(strip_comments(section_texts(APP_CSS.read_text(encoding="utf-8"))["5"][1]))
+                            [".seating__name"])
+        self.assertEqual((name["background-color"], name["border-color"], name["white-space"]),
+                         ("var(--seat-colour)", "var(--seat-colour)", "normal"))
 
     def test_the_scheme_has_no_text_transform(self):
         # the build writes the couple label in capitals: WebKit misplaces the
@@ -535,7 +560,7 @@ class SchemeStylesTest(unittest.TestCase):
         self.assertEqual(self.print[".scheme"], {"break-inside": "avoid",
                                                  "-webkit-print-color-adjust": "exact",
                                                  "print-color-adjust": "exact"})
-        # the guest's card (the scheme and the label of the seats) stays whole
+        # the guest's card (the scheme and the names of the seats) stays whole
         guest_card = ".menu--guest .seating__card"
         self.assertEqual(self.print[guest_card], {"break-inside": "avoid"})
         self.assertNotIn(".seating__meta", self.print)

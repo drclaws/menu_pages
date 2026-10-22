@@ -498,6 +498,16 @@ def _(menu, guests):
 
 
 @case(
+    "more_seats_than_colours",
+    base="mockup16",
+    errors=[G(1) + "field 'seats' lists 4 seats, at most 3 are allowed: the page of a guest marks each seat "
+            "of the record in a colour of its own (split the record in two)"],
+)
+def _(menu, guests):
+    record(guests, "Olga")["seats"] += [{"number": 12, "name": "Hugo"}, {"number": 13, "name": "Oscar"}]
+
+
+@case(
     "seat_number_not_a_number",
     errors=[G(3) + "field 'seats[0].number' must be a positive whole number, got a string"],
 )
@@ -870,20 +880,21 @@ def row_table() -> dict:
 
 
 class TableMessagesTest(unittest.TestCase):
-    def test_couple_label_that_leaves_no_room_for_a_label(self):
+    def test_couple_label_on_the_spot_of_a_label_of_a_guest(self):
+        # the couple label lies on the staff plan, the label "You" on the plan
+        # of a guest: one may take the spot of the other
         menu, guests = fixtures.plain()
         menu["table"] = row_table()
         menu["couple"] = {"label": fixtures.COUPLE_LABEL, "members": [{"seat": 4, "name": "Vera"}]}
         record(guests, "Rita")["seats"][0]["number"] = 5
         _index, errors, warnings = check(menu, guests)
-        self.assertEqual(
-            errors,
-            [
-                M + "couple.label: leaves no room for the 'You' label of seat 3",
-                M + "couple.label: leaves no room for the 'You' label of seat 5",
-            ],
-        )
-        self.assertEqual(warnings, [M + "table.arms[0] side 'top': seats 1-7 squeezed closer than 42 px"])
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [
+            M + "table.arms[0] side 'top': seats 1-7 squeezed closer than 42 px",
+            M + "field 'table.seats' has 2 free seat(s): 6, 7 (shown as free on the staff page; list a seat "
+            "that stays free on purpose in 'reservedSeats')",
+        ])
+        self.assertEqual(full_check(menu, guests)[0], [])
 
     def test_the_couple_against_a_table(self):
         menu, guests = fixtures.reserved19()

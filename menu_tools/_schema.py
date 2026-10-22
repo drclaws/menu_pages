@@ -992,6 +992,13 @@ def _check_seats(check: _Checker, record: dict, number: int, index: MenuIndex, m
     if not seats:
         check.error(("seats",), "must list at least one seat (the guest's own seat comes first)")
         return
+    colours = len(_table.SEAT_COLOURS)
+    if len(seats) > colours:
+        check.error(
+            ("seats",),
+            f"lists {len(seats)} seats, at most {colours} are allowed: the page of a guest marks each seat "
+            "of the record in a colour of its own (split the record in two)",
+        )
     label = guest_label(number)
     own: dict[int, int] = {}  # seat -> position in this record
     first: int | None = None

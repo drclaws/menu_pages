@@ -479,6 +479,16 @@
   --color-on-flag: #ffffff;
   /* The border of the couple's seats. */
   --color-couple-line: var(--color-text);
+  /* The seats of a guest record on its scheme and the names under it, one
+     colour per seat in the order of the seats of the record, the first one
+     the accent. Each holds white text at 4.5:1 or more and stands on the
+     card at 3:1 or more; their lightness differs by 12.5 L* or more, in
+     grey and under protanopia, deuteranopia and tritanopia as well, so the
+     seats of two people never differ by hue alone (a test checks it). None
+     is the orange of the dietary flags. */
+  --color-seat-1: var(--color-accent);
+  --color-seat-2: #481828;
+  --color-seat-3: #2e8442;
 
   /* Table scheme: seat and flag borders, the ring of the guest's own seat,
      the field (318 x 310 units) and how close it may come to the card edge:
@@ -491,17 +501,15 @@
   --seating-ratio: 318 / 310;
   --seating-bleed-gap: 5px;
   --scheme-font-number: 12px;
-  --scheme-font-number-you: 13px;
   --scheme-font-label: 12px;
   --scheme-font-badge: 10px;
   --scheme-font-couple: 11px;
   --scheme-tracking-couple: 0.06em;
-  /* The weight of the numbers of the guest's seats, of the badges and of
-     the labels "You" and "+1". */
+  /* The weight of the badges and of the label "You". */
   --scheme-font-weight-strong: 700;
   /* Print in black and white: the orange border of a seat with a dietary
      note is as light as the grey of a plain seat, so it prints thicker; the
-     ring of the guest's seat prints denser. */
+     rings of the guest's seats print denser. */
   --line-width-flag-print: 3.5px;
   --seat-ring-opacity-print: 0.35;
 
@@ -1282,7 +1290,7 @@ hr {
 }
 
 /* --- Seating ------------------------------------------------------------------
-   A card with the scheme and, under it, the label of the guest's seats or
+   A card with the scheme and, under it, the names of the guest's seats or
    the table of the seats; on the staff page the legend stands above it. */
 .seating {
   display: grid;
@@ -1306,14 +1314,15 @@ hr {
   gap: var(--space-2xs) var(--space-xs);
 }
 
-.seating__seats {
+/* A name under the scheme: a label in the colour of its seat on the scheme
+   (--seat-colour, set by the colour modifiers in section 6), white text. A
+   long name wraps inside its label; the labels wrap in centred rows. */
+.seating__name {
   padding: var(--space-3xs) var(--space-xs);
+  border-color: var(--seat-colour);
+  background-color: var(--seat-colour);
   font-weight: var(--font-weight-heading);
-}
-
-.seating__who {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
+  white-space: normal;
 }
 
 /* --- Text widget: variants body | lead | card | signature ------------------- */
@@ -1882,7 +1891,7 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
    6. Scheme
    -----------------------------------------------------------------------------
    The table scheme: an inline SVG of the table with its seats, the badges of
-   the dietary notes and the labels of the guest's seats, in a field of
+   the dietary notes and the label of the guest's seat, in a field of
    318 x 310 units. The markup holds the geometry alone; the colours, lines
    and type are set here by class. The type sizes are px of the viewBox, so
    they scale with the drawing. The radii of the seats depend on their
@@ -1953,21 +1962,33 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
   stroke-width: var(--line-width-flag);
 }
 
-/* The guest's own seat: a larger accent circle with a white number in a
-   translucent ring. */
-.seat--you .seat__circle {
-  fill: var(--color-accent);
-  stroke: var(--color-accent);
+/* The colours of the guest's own seats, one per seat in the order of the
+   record: a modifier sets --seat-colour for its seat and for the name of
+   the seat under the scheme (section 5). */
+.seat--colour-1,
+.seating__name--colour-1 {
+  --seat-colour: var(--color-seat-1);
 }
 
-.seat--you .seat__number {
-  fill: var(--color-on-accent);
-  font-size: var(--scheme-font-number-you);
-  font-weight: var(--scheme-font-weight-strong);
+.seat--colour-2,
+.seating__name--colour-2 {
+  --seat-colour: var(--color-seat-2);
+}
+
+.seat--colour-3,
+.seating__name--colour-3 {
+  --seat-colour: var(--color-seat-3);
+}
+
+/* The guest's own seat: a larger circle in the colour of the seat, in a
+   translucent ring of that colour; the guest page prints no numbers. */
+.seat--you .seat__circle {
+  fill: var(--seat-colour);
+  stroke: var(--seat-colour);
 }
 
 .seat__ring {
-  fill: var(--color-accent);
+  fill: var(--seat-colour);
   fill-opacity: var(--seat-ring-opacity);
 }
 
@@ -1984,10 +2005,10 @@ html.js .sets__tabs:not([hidden]) ~ .sets__panels > .sets__panel[hidden] {
   dominant-baseline: central;
 }
 
-/* "You" and "+1" next to the guest's seats, anchored on the side the build
-   chose. */
+/* "You" next to the one seat of a guest, anchored on the side the build
+   chose, in the colour of that seat (the first one, the accent). */
 .seat-label {
-  fill: var(--color-accent);
+  fill: var(--color-seat-1);
   font-size: var(--scheme-font-label);
   font-weight: var(--scheme-font-weight-strong);
   dominant-baseline: central;
@@ -2122,7 +2143,7 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
 
   /* Colours that are backgrounds: a browser leaves them out of print by
      default, and the white letter of a legend circle, the orange of a pill,
-     the label of the guest's seats and the staff bar would print white on
+     the names of the guest's seats and the staff bar would print white on
      white, the grey of the couple's seat numbers not at all. */
   .legend__mark,
   .pill,
@@ -2143,8 +2164,8 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   }
 
   /* The card of a guest's seats - the scheme and one line under it, less
-     than half a sheet - never splits either, so the label of the seats
-     stays on the sheet of the scheme. The staff card is left to break
+     than half a sheet - never splits either, so the names of the seats
+     stay on the sheet of the scheme. The staff card is left to break
      between the rows of its table: whole, it can be taller than what is
      left of a sheet. */
   .menu--guest .seating__card {
@@ -2152,8 +2173,8 @@ html.js.reveal-on [data-reveal]:not(.is-revealed) {
   }
 
   /* In black and white a seat with a dietary note differs from a plain one
-     by its thicker border (and its badge); the guest's seat stays dark with
-     a white number in a denser ring. */
+     by its thicker border (and its badge); the guest's seats stay dark, in
+     greys as far apart as the lightness of their colours, in denser rings. */
   .seat--flagged .seat__circle {
     stroke-width: var(--line-width-flag-print);
   }

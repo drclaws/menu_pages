@@ -64,19 +64,23 @@ BADGE_RADIUS = 9
 BADGE_OFFSET = 12
 MAX_BADGES = 4
 
-#: Seat centre to the near edge of a "You" or "+1" label: the edge of the ring.
+#: Seat centre to the near edge of the "You" label: the edge of the ring.
 LABEL_GAP = RING_RADIUS
 #: The box kept for a label (12 px bold: "You" is about 23 px wide).
 LABEL_WIDTH = 26
 LABEL_HEIGHT = 14
-#: How far a label keeps from the centre of another seat (not of the guest).
+#: How far a label keeps from the centre of another seat.
 SEAT_KEEP_OUT = SEAT_DIAMETER // 2 + 2
+
+#: The colours of the seats of a guest record, in the order of its seats:
+#: the modifier `seat--colour-<n>` of a seat of the guest on the plan (and
+#: of its name under the plan), drawn in the token `--color-seat-<n>`.  A
+#: record has at most this many seats.
+SEAT_COLOURS = ("1", "2", "3")
 
 #: Estimated width of a capital of the couple label, half px (7.5 px at
 #: 11 px with 0.06em tracking): there is no text measuring at build time.
 COUPLE_CHAR_HALVES = 15
-#: Half the height of the box of the couple label.
-COUPLE_HALF_HEIGHT = 7
 #: The couple label keeps this far from the ends of the free part of its arm.
 COUPLE_PADDING = 4
 
@@ -188,7 +192,6 @@ class _Caption(NamedTuple):
     y: int  # half px
     vertical: bool
     fits: bool
-    box: _Box
 
 
 # --------------------------------------------------------------------------
@@ -828,11 +831,12 @@ def _check(table: Any) -> tuple[TableCheck, _Plan | None]:
         return TableCheck(errors, warnings, total), None
 
     plan = _Plan(parsed.label, arms, parsed.ids, seats, _outline(arms))
-    # Any seat can be a seat of a guest, so every seat needs room for "You".
-    # With the constants above the label of a seat always fits onto its own
-    # arm; the check guards the layout against a change of the constants.
+    # Any seat can be the one seat of a guest, so every seat needs room for
+    # "You".  With the constants above the label of a seat always fits onto
+    # its own arm; the check guards the layout against a change of the
+    # constants.
     for seat in seats:
-        if _label_spot(seat, plan, {seat.number}, [], None) is None:
+        if _label_spot(seat, plan) is None:
             errors.append(f"{_seat_where(seat)}: no room for the 'You' label")
     return TableCheck(errors, warnings, total), (None if errors else plan)
 
@@ -976,7 +980,9 @@ def check_couple(
     """Check the couple against a table: their seats (from `couple.members`),
     the label (None: no label) and the arm of the label (None: the arm of the
     first seat).  The table itself is checked by `check_table`: when it has
-    errors, only what does not depend on it is checked here.
+    errors, only what does not depend on it is checked here.  The couple is
+    drawn on the staff plan alone, where no seat has a "You" label: the
+    couple label may lie anywhere on its arm.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -997,15 +1003,8 @@ def check_couple(
         errors.append("couple.arm: not an id of table.arms")
     if errors or plan is None or label is None:
         return TableCheck(errors, warnings, total)
-    caption = _caption(plan, numbers, label, arm)
-    if not caption.fits:
+    if not _caption(plan, numbers, label, arm).fits:
         warnings.append("couple.label: may not fit inside the arm")
-    # the couple label lies on an arm, where a "You" label may have to go
-    for seat in plan.seats:
-        if seat.number in numbers:
-            continue
-        if _label_spot(seat, plan, {seat.number}, [], caption.box) is None:
-            errors.append(f"couple.label: leaves no room for the 'You' label of seat {seat.number}")
     return TableCheck(errors, warnings, total)
 
 
@@ -1040,14 +1039,11 @@ def _caption(plan: _Plan, couple_seats: Sequence[int], label: str, arm_id: str |
     text = label.upper()
     width = len(text) * COUPLE_CHAR_HALVES  # half px
     fits = width <= 2 * (b - a - 2 * COUPLE_PADDING)
-    h = 2 * COUPLE_HALF_HEIGHT
     if vertical:
         x, y = arm.x0 + arm.x1, a + b
-        box = (x - h, y - width // 2, x + h, y + width // 2)
     else:
         x, y = a + b, arm.y0 + arm.y1
-        box = (x - width // 2, y - h, x + width // 2, y + h)
-    return _Caption(text, x, y, vertical, fits, box)
+    return _Caption(text, x, y, vertical, fits)
 
 
 # --------------------------------------------------------------------------
@@ -1078,33 +1074,19 @@ def _label_candidates(seat: _Seat) -> Iterator[_Spot]:
             yield (x - half_w, y + g, x + half_w, y + g + h), x, y + g + half_h, "middle"
 
 
-def _label_spot(
-    seat: _Seat, plan: _Plan, own: set, taken: Sequence[_Box], caption_box: _Box | None
-) -> _Spot | None:
-    """The first label spot inside the field that hits no other seat, label
-    or the couple label; the arms are avoided when possible (first pass),
-    else a label may lie on an arm.  None when there is no room.
-
-    A label keeps off the ring of another seat of the guest; as a last resort
-    (third pass) it keeps off that seat only as far as off any other seat:
-    this frees the spot on a narrow arm right between two seats of the guest.
-    """
-    blocked = list(taken) + ([caption_box] if caption_box else [])
+def _label_spot(seat: _Seat, plan: _Plan) -> _Spot | None:
+    """The first spot of the "You" label inside the field that keeps off
+    the other seats; the arms are avoided when possible (first pass), else
+    the label may lie on an arm.  None when there is no room."""
     arm_boxes = [_arm_box(arm) for arm in plan.arms]
-    passes = [(True, RING_RADIUS), (False, RING_RADIUS)]
-    if len(own) > 1:
-        passes.append((False, SEAT_KEEP_OUT))
-    for avoid_arms, own_keep_out in passes:
+    for avoid_arms in (True, False):
         for box, x, y, anchor in _label_candidates(seat):
             if box[0] < 0 or box[1] < 0 or box[2] > 2 * FIELD_WIDTH or box[3] > 2 * FIELD_HEIGHT:
-                continue
-            if any(_overlap(box, other) for other in blocked):
                 continue
             if avoid_arms and any(_overlap(box, other) for other in arm_boxes):
                 continue
             if any(
-                _distance2_to_box(t.cx, t.cy, box)
-                < (2 * (own_keep_out if t.number in own else SEAT_KEEP_OUT)) ** 2
+                _distance2_to_box(t.cx, t.cy, box) < (2 * SEAT_KEEP_OUT) ** 2
                 for t in plan.seats
                 if t.number != seat.number
             ):
@@ -1144,73 +1126,40 @@ def badge_capacity(table: Any, number: int) -> int:
     return min(MAX_BADGES, len(_badge_spots(plan.seats[number - 1])))
 
 
-def guest_scheme(
-    table: Any,
-    *,
-    couple_seats: Sequence[int],
-    couple_label: str | None,
-    couple_arm: str | None,
-    own_seats: Sequence[int],
-    plus_one_seats: Sequence[int],
-    mine_text: str,
-) -> dict:
+def guest_scheme(table: Any, *, own_seats: Sequence[int], mine_text: str) -> dict:
     """The `scheme` object of a guest page.
 
-    `own_seats` are the seats of the guest record (the first one is the
-    guest's own), `plus_one_seats` those of them taken by a +1.  The guest
-    gets "You" and "+1" labels only with one or two seats; there are no
-    badges and no dietary marks.  `mine_text` ("8 and 9") is worded by the
-    caller.
+    `own_seats` are the seats of the guest record, the guest's own first;
+    each of them is drawn in a colour of its own, by its place in the record
+    (`SEAT_COLOURS`).  Only the one seat of a record of one seat gets the
+    "You" label (`check_table` makes sure that it fits at any seat); the
+    seats of a larger record are told apart by their colours alone.  Every
+    other seat is a plain one: the guest plan has no couple, no couple
+    label, no badges and no dietary marks.  `mine_text` ("Olga — blue") is
+    worded by the caller.
 
     Raises TableError when the table does not pass `check_table` or the
-    parameters contradict it.  `check_table` makes sure that a label fits
-    at any single seat.  With two seats of the guest each label also keeps
-    off the other seat of the guest and off the label placed before it.
-    When the two seats face each other across a narrow arm at the edge of
-    the field, a label goes onto the arm between them, even close to the
-    other seat.  The labels may still find no room when both can only go
-    onto that same spot, their outward spots being out of the field or
-    taken: then TableError names only the seat numbers ("seat 5: no room
-    for the '+1' label").
+    parameters contradict it, more seats than colours among them.
     """
     plan = _checked(table)
     total = len(plan.seats)
     own = _seat_numbers(own_seats)
     if own is None or not own or len(set(own)) != len(own) or not all(1 <= n <= total for n in own):
         raise TableError(f"own_seats: expected different seat numbers from 1 to {total}")
-    plus_one = _seat_numbers(plus_one_seats)
-    if plus_one is None or not set(plus_one) <= set(own[1:]):
-        raise TableError("plus_one_seats: expected seats of the guest other than the first one")
+    if len(own) > len(SEAT_COLOURS):
+        raise TableError(f"own_seats: expected at most {len(SEAT_COLOURS)} seats, one per colour")
     if not isinstance(mine_text, str):
         raise TableError("mine_text: expected a string")
-    couple, caption = _couple_input(plan, couple_seats, couple_label, couple_arm)
-    if set(couple) & set(own):
-        raise TableError("couple_seats: the couple sits at a seat of the guest")
-    seats = _seat_entries(plan, own=set(own), couple=set(couple), flagged=set())
+    seats = _seat_entries(plan, own=own, couple=set(), flagged=set())
     labels = []
-    if len(own) <= 2:
-        taken: list[_Box] = []
-        for position, number in enumerate(own):
-            is_you, is_plus_one = position == 0, number in plus_one
-            if not is_you and not is_plus_one:
-                continue
-            spot = _label_spot(
-                plan.seats[number - 1], plan, set(own), taken, caption.box if caption else None
-            )
-            if spot is None:
-                text = "You" if is_you else "+1"
-                raise TableError(f"seat {number}: no room for the '{text}' label")
-            box, x, y, anchor = spot
-            taken.append(box)
-            labels.append({
-                "isYou": is_you,
-                "isPlusOne": is_plus_one,
-                "x": _px(x),
-                "y": _px(y),
-                "anchor": anchor,
-            })
     single = len(own) == 1
-    return _scheme(plan, caption, seats, [], labels, hidden=False, mine=mine_text, single=single)
+    if single:
+        spot = _label_spot(plan.seats[own[0] - 1], plan)
+        if spot is None:  # pragma: no cover - check_table leaves room at every seat
+            raise TableError(f"seat {own[0]}: no room for the 'You' label")
+        _box, x, y, anchor = spot
+        labels.append({"x": _px(x), "y": _px(y), "anchor": anchor})
+    return _scheme(plan, None, seats, [], labels, hidden=False, mine=mine_text, single=single)
 
 
 def staff_scheme(
@@ -1225,7 +1174,8 @@ def staff_scheme(
 
     `letters` maps a seat number to the letters of its dietary notes in the
     order of the legend; such a seat is marked and gets a badge per letter.
-    There are no "You" or "+1" labels.
+    The seats of the couple and the couple label are drawn; there are no
+    seats of a guest, no colours of them and no "You" label.
     """
     plan = _checked(table)
     total = len(plan.seats)
@@ -1242,7 +1192,7 @@ def staff_scheme(
         if items:
             flagged[number] = list(items)
     couple, caption = _couple_input(plan, couple_seats, couple_label, couple_arm)
-    seats = _seat_entries(plan, own=set(), couple=set(couple), flagged=set(flagged))
+    seats = _seat_entries(plan, own=[], couple=set(couple), flagged=set(flagged))
     badges = []
     for number in sorted(flagged):
         items = flagged[number]
@@ -1277,11 +1227,14 @@ def _couple_input(
     return couple, _caption(plan, couple, couple_label, couple_arm)
 
 
-def _seat_entries(plan: _Plan, *, own: set, couple: set, flagged: set) -> list[dict]:
+def _seat_entries(plan: _Plan, *, own: Sequence[int], couple: set, flagged: set) -> list[dict]:
+    """The seats of a plan; `own` are the seats of a guest in the order of
+    the record: each takes the colour of its place."""
+    colours = dict(zip(own, SEAT_COLOURS))
     entries = []
     for seat in plan.seats:
         number = seat.number
-        kind = "you" if number in own else "couple" if number in couple else "regular"
+        kind = "you" if number in colours else "couple" if number in couple else "regular"
         mark = "flagged" if number in flagged else "none"
         radius = YOU_R if kind == "you" else FLAG_R if mark == "flagged" else SEAT_R
         entries.append({
@@ -1291,6 +1244,7 @@ def _seat_entries(plan: _Plan, *, own: set, couple: set, flagged: set) -> list[d
             "r": radius,
             "kind": kind,
             "mark": mark,
+            "colour": colours.get(number, ""),
             "ring": kind == "you",
             "ringR": RING_R,
         })

@@ -3,9 +3,9 @@
 A page fragment holds every fixed text of the interface ("Staff version",
 "No.", "Paired with", "You", "+1", "[name]" and so on).  The texts here are
 the ones the build has to put together with numbers or names before they
-reach a fragment: "Seats 8 & 9", "Olga and your guest", "If chosen by seat 3
-(no nuts) - ...", "14 guests".  One place for all of them, so that the
-wording of the menu is easy to change.
+reach a fragment: "Seats 8 & 9", "Olga — blue, your guest — dark red", "If
+chosen by seat 3 (no nuts) - ...", "14 guests".  One place for all of them,
+so that the wording of the menu is easy to change.
 
 Seat numbers are always listed in ascending order.  Standard library only.
 """
@@ -23,16 +23,18 @@ SEATS_INLINE = "seats"
 #: Between the items of a list, and before its last item.
 LIST_SEPARATOR = ", "
 LAST_SEPARATOR = " & "
-#: Before the last item of a list in running text ("8 and 9").
-AND = " and "
-#: Between seats and what to do for them.
+#: Between seats and what to do for them, and between a name and its colour.
 DASH = " — "
 #: Between the parts of a line ("vegan · gluten-free").
 DOT = " · "
 
-#: In place of the names of the companions that are not known: one, or two or more.
+#: In place of the name of a companion that is not known.
 YOUR_GUEST = "your guest"
-YOUR_GUESTS = "your guests"
+
+#: The names of the colours of the seats of a guest record, in the order of
+#: its seats (`_table.SEAT_COLOURS`, the tokens `--color-seat-<n>`): the plan
+#: of the table tells in words whose seat is marked in which colour.
+SEAT_COLOUR_NAMES = ("blue", "dark red", "green")
 
 #: The first and the next swap lines of a set.
 IF_CHOSEN_BY = "If chosen by"
@@ -61,9 +63,9 @@ def _series(texts: Sequence[str], last: str) -> str:
     return LIST_SEPARATOR.join(texts[:-1]) + last + texts[-1]
 
 
-def number_list(numbers: Iterable[int], last: str = LAST_SEPARATOR) -> str:
+def number_list(numbers: Iterable[int]) -> str:
     """`[9, 8]` -> "8 & 9"; `[10, 8, 9]` -> "8, 9 & 10"; `[8]` -> "8"."""
-    return _series([str(number) for number in sorted(numbers)], last)
+    return _series([str(number) for number in sorted(numbers)], LAST_SEPARATOR)
 
 
 def seat_label(numbers: Sequence[int]) -> str:
@@ -78,24 +80,24 @@ def seats_inline(numbers: Sequence[int]) -> str:
     return f"{word} {number_list(numbers)}"
 
 
-def mine_text(numbers: Sequence[int]) -> str:
-    """The seats of a guest for the text of the table plan: "8", "8 and 9",
-    "8, 9 and 10"."""
-    return number_list(numbers, AND)
+def seat_names(name: str, seats: Sequence[str]) -> list[str]:
+    """Who sits at each seat of a record, in the order of its seats: the
+    name of the seat; without one, the name of the record at the first seat
+    and "your guest" at a +1.  `seats` holds the name of each seat, "" for
+    a seat without one.  `["", "Oscar"]` of "Olga" -> ["Olga", "Oscar"];
+    `["", ""]` -> ["Olga", "your guest"].  The page of the record is the
+    only one that shows these names."""
+    return [seat or (name if position == 0 else YOUR_GUEST) for position, seat in enumerate(seats)]
 
 
-def who_label(name: str, companions: Sequence[str]) -> str:
-    """"Olga", "Olga and Oscar", "Olga, Oscar and Hugo", "Olga and your
-    guest", "Olga, Oscar and your guests": the name of the record and of
-    the companions who come with it (its `plusOne` seats, in their order).
-    `companions` holds the name of each companion, "" for one without a
-    name; those are "your guest" or "your guests", after the names.  The
-    page of the record is the only one that shows this label."""
-    named = [companion for companion in companions if companion]
-    unknown = len(companions) - len(named)
-    if unknown:
-        named.append(YOUR_GUEST if unknown == 1 else YOUR_GUESTS)
-    return _series([name, *named], AND)
+def colour_key(names: Sequence[str]) -> str:
+    """Whose seat is marked in which colour, for the text of the table plan:
+    each name with the colour of its place in the record, "Olga — blue",
+    "Olga — blue, your guest — dark red".  A record has at most as many
+    seats as there are colours."""
+    return LIST_SEPARATOR.join(
+        f"{name}{DASH}{SEAT_COLOUR_NAMES[position]}" for position, name in enumerate(names)
+    )
 
 
 def section_title(seats: int) -> str:
@@ -150,8 +152,8 @@ __all__ = [
     "number_list",
     "seat_label",
     "seats_inline",
-    "mine_text",
-    "who_label",
+    "seat_names",
+    "colour_key",
     "section_title",
     "counted",
     "guests_text",

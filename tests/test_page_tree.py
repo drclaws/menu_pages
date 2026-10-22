@@ -9,12 +9,13 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from menu_tools import _core, _page, _schema, _words  # noqa: E402  (imported after sys.path is prepared)
+from menu_tools import _core, _page, _schema, _table, _words  # noqa: E402  (imported after sys.path is prepared)
 from tests import fixtures  # noqa: E402
 
 DASH = " — "
@@ -77,25 +78,25 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(_words.seat_label([10, 8, 9]), "Seats 8, 9 & 10")
         self.assertEqual(_words.seat_label([19, 1]), "Seats 1 & 19")
 
-    def test_mine_text(self):
-        self.assertEqual(_words.mine_text([8]), "8")
-        self.assertEqual(_words.mine_text([8, 9]), "8 and 9")
-        self.assertEqual(_words.mine_text([19, 1]), "1 and 19")
-        self.assertEqual(_words.mine_text([10, 8, 9]), "8, 9 and 10")
+    def test_seat_names(self):
+        self.assertEqual(_words.seat_names("Olga", [""]), ["Olga"])
+        # a +1 without a name, a +1 with one, in the order of the seats
+        self.assertEqual(_words.seat_names("Olga", ["", ""]), ["Olga", "your guest"])
+        self.assertEqual(_words.seat_names("Olga", ["", "Oscar"]), ["Olga", "Oscar"])
+        self.assertEqual(_words.seat_names("Olga", ["", "", "Hugo"]), ["Olga", "your guest", "Hugo"])
+        # a record for two: the names of its seats, the name of the record
+        # only for a first seat without one
+        self.assertEqual(_words.seat_names("Peggy and Victor", ["Peggy", "Victor"]), ["Peggy", "Victor"])
+        self.assertEqual(_words.seat_names("Peggy and Victor", ["", "Victor"]), ["Peggy and Victor", "Victor"])
 
-    def test_who_label(self):
-        self.assertEqual(_words.who_label("Olga", []), "Olga")
-        # the companions without a name
-        self.assertEqual(_words.who_label("Olga", [""]), "Olga and your guest")
-        self.assertEqual(_words.who_label("Olga", ["", ""]), "Olga and your guests")
-        # the companions with a name, in their order
-        self.assertEqual(_words.who_label("Olga", ["Oscar"]), "Olga and Oscar")
-        self.assertEqual(_words.who_label("Olga", ["Oscar", "Hugo"]), "Olga, Oscar and Hugo")
-        # both: the names first
-        self.assertEqual(_words.who_label("Olga", ["Oscar", ""]), "Olga, Oscar and your guest")
-        self.assertEqual(_words.who_label("Olga", ["", "Oscar"]), "Olga, Oscar and your guest")
-        self.assertEqual(_words.who_label("Olga", ["", "Oscar", ""]), "Olga, Oscar and your guests")
-        self.assertEqual(_words.who_label("Olga", ["Oscar", "", "Hugo"]), "Olga, Oscar, Hugo and your guest")
+    def test_colour_key(self):
+        self.assertEqual(_words.SEAT_COLOUR_NAMES, ("blue", "dark red", "green"))
+        self.assertEqual(_words.colour_key(["Olga"]), f"Olga{DASH}blue")
+        self.assertEqual(_words.colour_key(["Olga", "your guest"]), f"Olga{DASH}blue, your guest{DASH}dark red")
+        self.assertEqual(_words.colour_key(["Olga", "Oscar", "Hugo"]),
+                         f"Olga{DASH}blue, Oscar{DASH}dark red, Hugo{DASH}green")
+        with self.assertRaises(IndexError):
+            _words.colour_key(["Olga", "Oscar", "Hugo", "Ada"])
 
     def test_counters(self):
         self.assertEqual(_words.guests_text(1), "1 guest")
@@ -131,97 +132,114 @@ class GuestSeatsTest(unittest.TestCase):
     def seating_of(self, name: str) -> dict:
         return seating(guest_tree(self.trees, self.guests, name))
 
+    def names(self, widget: dict) -> list[tuple[str, str]]:
+        return [(item["name"], item["colour"]) for item in widget["names"]]
+
+    def colours(self, scheme: dict) -> dict[str, str]:
+        return {seat["number"]: seat["colour"] for seat in scheme["seats"] if seat["colour"]}
+
     def test_one_seat(self):
         widget = self.seating_of("Boris")
-        self.assertEqual(widget["seatLabel"], "Seat 4")
-        self.assertEqual(widget["whoLabel"], "Boris")
+        self.assertEqual(self.names(widget), [("Boris", "1")])
         self.assertEqual(widget["mySeats"], [{"number": 4, "mark": "you"}])
         scheme = widget["scheme"]
-        self.assertEqual(scheme["mine"], "4")
+        self.assertEqual(scheme["mine"], f"Boris{DASH}blue")
         self.assertTrue(scheme["single"])
-        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in scheme["labels"]], [(True, False)])
+        self.assertEqual(self.colours(scheme), {"4": "1"})
+        [label] = scheme["labels"]
+        self.assertEqual(set(label), {"x", "y", "anchor"})
+        self.assertLess(distance2(label, centre(scheme, 4)), distance2(label, centre(scheme, 3)))
 
     def test_a_plus_one_without_a_name(self):
         widget = self.seating_of("Olga")
-        self.assertEqual(widget["seatLabel"], "Seats 8 & 9")
-        self.assertEqual(widget["whoLabel"], "Olga and your guest")
+        self.assertEqual(self.names(widget), [("Olga", "1"), ("your guest", "2")])
         self.assertEqual(widget["mySeats"], [{"number": 8, "mark": "you"}, {"number": 9, "mark": "plusOne"}])
-        self.assertEqual(widget["scheme"]["mine"], "8 and 9")
+        self.assertEqual(widget["scheme"]["mine"], f"Olga{DASH}blue, your guest{DASH}dark red")
+        self.assertEqual(self.colours(widget["scheme"]), {"8": "1", "9": "2"})
 
     def test_a_plus_one_with_a_name(self):
-        # the label under the plan names the companion; the marks on the plan are "You" and "+1"
+        # the names under the plan name the companion; the plan has no labels
         widget = self.seating_of("Nina")
-        self.assertEqual(widget["seatLabel"], "Seats 15 & 16")
-        self.assertEqual(widget["whoLabel"], "Nina and Oscar")
+        self.assertEqual(self.names(widget), [("Nina", "1"), ("Oscar", "2")])
         self.assertEqual(widget["mySeats"], [{"number": 15, "mark": "you"}, {"number": 16, "mark": "plusOne"}])
-        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in widget["scheme"]["labels"]],
-                         [(True, False), (False, True)])
+        self.assertEqual(widget["scheme"]["labels"], [])
 
     def test_a_plus_one_across_the_end_of_the_numbers(self):
-        # the guest on seat 19, the +1 on seat 1: neighbours on the plan
+        # the guest on seat 19, the +1 on seat 1: the colours follow the
+        # order of the record, not the numbers
         widget = self.seating_of("Greta")
-        self.assertEqual(widget["seatLabel"], "Seats 1 & 19")
-        self.assertEqual(widget["whoLabel"], "Greta and Hugo")
+        self.assertEqual(self.names(widget), [("Greta", "1"), ("Hugo", "2")])
         self.assertEqual(widget["mySeats"], [{"number": 1, "mark": "plusOne"}, {"number": 19, "mark": "you"}])
         scheme = widget["scheme"]
-        self.assertEqual(scheme["mine"], "1 and 19")
+        self.assertEqual(scheme["mine"], f"Greta{DASH}blue, Hugo{DASH}dark red")
         self.assertFalse(scheme["single"])
         kinds = {seat["number"]: seat["kind"] for seat in scheme["seats"]}
         self.assertEqual((kinds["1"], kinds["19"]), ("you", "you"))
-        you, plus_one = scheme["labels"]
-        self.assertEqual((you["isYou"], you["isPlusOne"]), (True, False))
-        self.assertEqual((plus_one["isYou"], plus_one["isPlusOne"]), (False, True))
-        # "You" next to seat 19, "+1" next to seat 1
-        self.assertLess(distance2(you, centre(scheme, 19)), distance2(you, centre(scheme, 1)))
-        self.assertLess(distance2(plus_one, centre(scheme, 1)), distance2(plus_one, centre(scheme, 19)))
-        self.assertEqual((you["x"], you["y"], plus_one["x"], plus_one["y"]), ("59", "142", "17", "38"))
+        self.assertEqual(self.colours(scheme), {"19": "1", "1": "2"})
+        self.assertEqual(scheme["labels"], [])
 
     def test_a_record_for_two(self):
+        # the names of the seats, not the name of the record
         widget = self.seating_of("Peggy and Victor")
-        self.assertEqual(widget["seatLabel"], "Seats 2 & 3")
-        self.assertEqual(widget["whoLabel"], "Peggy and Victor")
+        self.assertEqual(self.names(widget), [("Peggy", "1"), ("Victor", "2")])
         self.assertEqual(widget["mySeats"], [{"number": 2, "mark": "you"}, {"number": 3, "mark": "none"}])
         scheme = widget["scheme"]
-        kinds = {seat["number"]: seat["kind"] for seat in scheme["seats"]}
-        self.assertEqual((kinds["2"], kinds["3"]), ("you", "you"))
-        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in scheme["labels"]], [(True, False)])
+        self.assertEqual(self.colours(scheme), {"2": "1", "3": "2"})
+        self.assertEqual(scheme["labels"], [])
+        self.assertEqual(scheme["mine"], f"Peggy{DASH}blue, Victor{DASH}dark red")
 
-    def test_more_than_two_seats_get_no_marks(self):
+    def test_three_seats_in_three_colours(self):
         menu, guests = fixtures.mockup16()
         olga = guests[0]
-        olga["seats"] += [{"number": 12, "plusOne": True}, {"number": 13, "name": "Ada"}]
+        olga["seats"].append({"number": 13, "name": "Ada"})
         trees, _report = build(menu, guests)
         widget = seating(guest_tree(trees, guests, "Olga"))
-        self.assertEqual(widget["seatLabel"], "Seats 8, 9, 12 & 13")
-        self.assertEqual(widget["whoLabel"], "Olga and your guests")
+        self.assertEqual(self.names(widget), [("Olga", "1"), ("your guest", "2"), ("Ada", "3")])
         self.assertEqual({item["mark"] for item in widget["mySeats"]}, {"none"})
+        self.assertEqual(self.colours(widget["scheme"]), {"8": "1", "9": "2", "13": "3"})
         self.assertEqual(widget["scheme"]["labels"], [])
-        self.assertEqual(widget["scheme"]["mine"], "8, 9, 12 and 13")
+        self.assertEqual(widget["scheme"]["mine"], f"Olga{DASH}blue, your guest{DASH}dark red, Ada{DASH}green")
+
+    def test_more_seats_than_colours_is_an_error_of_the_data(self):
+        menu, guests = fixtures.mockup16()
+        guests[0]["seats"] += [{"number": 12, "plusOne": True}, {"number": 13, "name": "Ada"}]
+        report = _core.Report()
+        _schema.check_data(menu, guests, report)
+        self.assertEqual(report.errors, [
+            "guests.json: guest #1: field 'seats' lists 4 seats, at most 3 are allowed: the page of a guest "
+            "marks each seat of the record in a colour of its own (split the record in two)"])
 
     def test_companions_with_and_without_a_name(self):
         menu, guests = fixtures.mockup16()
         olga = guests[0]
         olga["seats"].append({"number": 12, "plusOne": True, "name": "Hugo"})
         trees, _report = build(menu, guests)
-        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Hugo and your guest")
+        self.assertEqual(self.names(seating(guest_tree(trees, guests, "Olga"))),
+                         [("Olga", "1"), ("your guest", "2"), ("Hugo", "3")])
         olga["seats"][1]["name"] = "Ada"
         trees, _report = build(menu, guests)
-        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Ada and Hugo")
+        self.assertEqual(self.names(seating(guest_tree(trees, guests, "Olga"))),
+                         [("Olga", "1"), ("Ada", "2"), ("Hugo", "3")])
         # a name of blanks is no name
         olga["seats"][2]["name"] = "  "
         trees, _report = build(menu, guests)
-        self.assertEqual(seating(guest_tree(trees, guests, "Olga"))["whoLabel"], "Olga, Ada and your guest")
+        self.assertEqual(self.names(seating(guest_tree(trees, guests, "Olga"))),
+                         [("Olga", "1"), ("Ada", "2"), ("your guest", "3")])
 
-    def test_the_couple_on_the_plan_of_a_guest(self):
+    def test_no_couple_on_the_plan_of_a_guest(self):
         scheme = self.seating_of("Boris")["scheme"]
-        self.assertEqual(scheme["couple"]["text"], "IVAN · VERA")
+        self.assertIsNone(scheme["couple"])
         kinds = {seat["number"]: seat["kind"] for seat in scheme["seats"]}
-        self.assertEqual((kinds["6"], kinds["7"]), ("couple", "couple"))
+        self.assertEqual((kinds["6"], kinds["7"]), ("regular", "regular"))
         self.assertEqual(scheme["badges"], [])
         self.assertEqual({seat["mark"] for seat in scheme["seats"]}, {"none"})
         self.assertFalse(scheme["hidden"])
         # the reserved seat is an ordinary seat on the plan
         self.assertEqual(kinds["13"], "regular")
+        # the staff plan has the couple
+        staff = seating(self.trees.staff.tree)["scheme"]
+        self.assertEqual(staff["couple"]["text"], "IVAN · VERA")
+        self.assertEqual([seat["number"] for seat in staff["seats"] if seat["kind"] == "couple"], ["6", "7"])
 
 
 # --------------------------------------------------------------------------
@@ -498,7 +516,8 @@ class OptionsTest(unittest.TestCase):
         trees, _report = build(menu, guests)
         widget = seating(guest_tree(trees, guests, "Klara"))
         self.assertIsNone(widget["scheme"])
-        self.assertEqual((widget["seatLabel"], widget["whoLabel"]), ("Seats 2 & 3", "Klara and your guest"))
+        # the names under the place of the plan keep their colours
+        self.assertEqual(widget["names"], [{"name": "Klara", "colour": "1"}, {"name": "your guest", "colour": "2"}])
         staff = seating(trees.staff.tree)
         self.assertIsNone(staff["scheme"])
         self.assertEqual(staff["legend"], [])
@@ -515,30 +534,24 @@ class OptionsTest(unittest.TestCase):
         staff = seating(trees.staff.tree)
         self.assertEqual((staff["scheme"], staff["legend"], staff["rows"]), (None, [], []))
 
-    def test_a_plan_without_room_for_a_label_is_an_error_of_the_record(self):
-        menu, guests = fixtures.plain()
-        menu["table"] = {
-            "label": "Two narrow arms",
-            "arms": [
-                {"id": "west", "x": 48, "y": 37, "width": 20, "height": 233},
-                {"id": "east", "x": 172, "y": 37, "width": 20, "height": 233},
-            ],
-            "seats": [
-                {"arm": "west", "side": "right", "count": 3},
-                {"arm": "west", "side": "left", "count": 3},
-                {"arm": "east", "side": "left", "count": 3},
-            ],
-        }
-        guests[:3] = [
-            {"token": "lynx-5qd8", "name": "Lev", "seats": [{"number": 5}, {"number": 2, "plusOne": True}]},
-            {"token": "badger-8wt4", "name": "Rita", "seats": [{"number": 7}]},
-        ]
+    def test_a_plan_that_cannot_be_laid_out_is_an_error_of_the_record(self):
+        # checked data always fits (the label "You" has room at every seat);
+        # the error of a layout names the record and seat numbers only
+        menu, guests = fixtures.reserved19()
+        guest_scheme = _table.guest_scheme
+
+        def failing(table, *, own_seats, mine_text):
+            if own_seats == [4]:
+                raise _table.TableError("seat 4: no room for the 'You' label")
+            return guest_scheme(table, own_seats=own_seats, mine_text=mine_text)
+
         report = _core.Report()
         index = _schema.check_data(menu, guests, report)
         self.assertEqual(report.errors, [])
-        trees = _page.build_trees(menu, guests, report)
-        self.assertEqual(report.errors, ["guests.json: guest #1: seat 2: no room for the '+1' label"])
-        self.assertEqual([page.number for page in trees.guests], [2])
+        with mock.patch.object(_table, "guest_scheme", failing):
+            trees = _page.build_trees(menu, guests, report)
+        self.assertEqual(report.errors, ["guests.json: guest #3: seat 4: no room for the 'You' label"])
+        self.assertEqual([page.number for page in trees.guests], [1, 2, *range(4, 13)])
         self.assertIsNotNone(trees.staff)
         self.assertTrue(index.ok)
 
@@ -586,13 +599,14 @@ SECTION_FIELDS = {"id", "type", "domId", "titleId", "title", "eyebrow", "note", 
 WIDGET_BASE = {"type", "domId", "labelledBy"}
 WIDGET_FIELDS = {
     "text": {"text", "variant"},
-    "seating": {"scheme", "mySeats", "seatLabel", "whoLabel", "legend", "rows", "footnote"},
+    "seating": {"scheme", "mySeats", "names", "legend", "rows", "footnote"},
     "dishes": {"title", "items"},
     "sets": {"items", "note", "count", "multiple"},
     "drinks": {"groups", "list", "note"},
     "heading": {"titleId", "title", "eyebrow"},
 }
 MY_SEAT_FIELDS = {"number", "mark"}
+NAME_FIELDS = {"name", "colour"}
 LEGEND_FIELDS = {"letter", "label"}
 ROW_FIELDS = {"number", "name", "isPlusOne", "hostName", "roleLabel", "isCouple", "isFree", "tags"}
 DISH_FIELDS = {"name", "ingredients", "allergens", "tags", "noRestrictions", "swapLines", "note"}
@@ -648,6 +662,13 @@ class ContractTest(unittest.TestCase):
                 self.assert_fields(item, MY_SEAT_FIELDS, where)
                 self.assertIn(item["mark"], _page.MARKS)
                 self.assertIsInstance(item["number"], int)
+            # a name per seat of a guest, in the colours of the places of the record
+            self.assertEqual([item["colour"] for item in widget["names"]],
+                             list(_table.SEAT_COLOURS[:len(widget["mySeats"])]), where)
+            for item in widget["names"]:
+                self.assert_fields(item, NAME_FIELDS, where)
+                self.assert_strings(item, ("name",), where)
+                self.assertTrue(item["name"], where)
             for item in widget["legend"]:
                 self.assert_fields(item, LEGEND_FIELDS, where)
             for item in widget["rows"]:

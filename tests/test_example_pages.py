@@ -133,17 +133,44 @@ class ExamplePagesTest(unittest.TestCase):
                     self.assertNotRegex(page, r'(?i)<meta[^>]+(?:property|name)="og:')
                     self.assertIn('<link rel="stylesheet" href="/menu/assets/app.css">', page)
 
-    def test_the_pages_link_nowhere(self):
-        # no link at all, and every address is a shared file of the output
+    def test_the_pages_link_only_to_their_own_parts(self):
+        # every link leads to an element of its own page, every other
+        # address is a shared file of the output
         for name, (_out, _menu, _guests, pages, _staff) in self.built.items():
             for token, page in pages.items():
                 with self.subTest(set=name, page=token):
-                    self.assertNotRegex(page, r"(?i)<a[\s/>]")
                     self.assertNotRegex(page, r"(?i)<area[\s/>]")
-                    addresses = ADDRESS_RE.findall(page)
+                    ids = set(re.findall(r'\sid="([^"]+)"', page))
+                    links = re.findall(r"(?i)<a[\s/>][^>]*>", page)
+                    self.assertTrue(links)
+                    for link in links:
+                        target = re.fullmatch(r'<a class="section-nav__link" href="#([^"]+)" data-section-nav-link>',
+                                              link)
+                        self.assertIsNotNone(target, link)
+                        self.assertIn(target.group(1), ids)
+                    addresses = [address for address in ADDRESS_RE.findall(page) if not address.startswith("#")]
                     self.assertTrue(addresses)
                     for address in addresses:
                         self.assertTrue(address.startswith(ASSETS_PREFIX), address)
+
+    def test_the_line_of_the_sections(self):
+        expected = {"data": ["Seats", "Food", "Drinks", "Info"],
+                    "data-plain": ["Seats", "Starters", "Mains", "Drinks"]}
+        for name, (_out, _menu, _guests, pages, staff) in self.built.items():
+            for token, page in pages.items():
+                with self.subTest(set=name, page=token):
+                    self.assertEqual(page.count("<nav "), 1)
+                    line = re.search(r'<nav class="section-nav" aria-label="Sections" data-section-nav>.*?</nav>',
+                                     page, re.S).group(0)
+                    self.assertEqual(re.findall(r">([^<]+)</a>", line), expected[name])
+                    # before the sections, the first element of a guest page
+                    self.assertLess(page.index(line), page.index('<main class="page">'))
+                    if token != staff:
+                        self.assertRegex(page, r"<body>\s*<nav ")
+                        # the signature closes the page without a link
+                        self.assertIn('id="s-signature"', page)
+                    self.assertNotIn('href="#s-signature"', line)
+                    self.assertNotIn('href="#s-cover"', line)
 
     def test_the_headings_have_no_gaps(self):
         # h1 the cover, h2 a section, h3 the heading of a part and a set

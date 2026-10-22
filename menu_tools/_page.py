@@ -16,6 +16,10 @@ never reach the code of a guest page.  The staff page reads the whole menu
 and the records without their tokens and notes.  No page holds a token: the
 token of a record names the directory of its page and nothing else.
 
+The line of the sections at the top of a page (`nav` of the root) links the
+sections of that page that have a label (`nav` of a section), in their
+order: a section the page does not show has no link there.
+
 A heading widget is the head of a part of its section: the widgets after it
 on the same page, up to the next heading.  A heading with no other widget
 under it on a page is left out of that page, so a section that keeps only
@@ -120,8 +124,18 @@ def _root(source: dict, settings: Settings, *, is_staff: bool) -> dict:
         "themeColor": settings.theme_color,
         "staff": {key: "" for key in STAFF_FIELDS},
         "counters": {"guests": 0, "notes": 0, "guestsText": "", "notesText": "", "tableLabel": ""},
+        "nav": [],
         "sections": [],
     }
+
+
+def _add_section(root: dict, built: dict | None, label: str) -> None:
+    """A section of the page and, with a label, its link in the line."""
+    if built is None:
+        return
+    root["sections"].append(built)
+    if label:
+        root["nav"].append({"label": label, "target": built["domId"]})
 
 
 def _section(section_id: str, kind: str) -> dict:
@@ -253,6 +267,7 @@ def public_menu(menu: dict) -> dict:
             "visible": section.get("visible", True),
             "title": _text(section.get("title")),
             "eyebrow": _text(section.get("eyebrow")),
+            "nav": _text(section.get("nav")),
             "widgets": widgets,
         })
     return public
@@ -354,9 +369,7 @@ class _GuestPage:
     def tree(self) -> dict:
         root = _root(self.public, self.settings, is_staff=False)
         for section in self.public["sections"]:
-            built = self.section(section)
-            if built is not None:
-                root["sections"].append(built)
+            _add_section(root, self.section(section), section.get("nav", ""))
         return root
 
     def section(self, section: dict) -> dict | None:
@@ -547,9 +560,7 @@ class _StaffPage:
             "tableLabel": table["label"] if table else "",
         }
         for section in menu["sections"]:
-            built = self.section(section)
-            if built is not None:
-                root["sections"].append(built)
+            _add_section(root, self.section(section), _text(section.get("nav")))
         return root
 
     def section(self, section: dict) -> dict | None:

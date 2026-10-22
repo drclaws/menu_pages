@@ -52,6 +52,10 @@ MENU_TOKENS = frozenset({
     "--sets-tab-min",
     "--label-padding-block",
     "--number-box-width",
+    "--section-nav-padding-block",
+    "--section-nav-size",
+    "--section-nav-block-size",
+    "--section-nav-gap",
 })
 
 #: Plain properties of `:root` compared like tokens: the theme is part of the design.

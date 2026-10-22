@@ -19,8 +19,11 @@
 <!-- The frame of a menu page. The sections come in order from partials/sections:
      each one is the fragment of its type (sections/cover, sections/custom), the
      widgets are the fragments widgets/<type>. The markup of sections and widgets
-     lives in fragments/; here are only the head, the staff bar, the main element
-     and the staff footer.
+     lives in fragments/; here are only the head, the staff bar, the line of the
+     sections, the main element and the staff footer.
+     The line of the sections (partials/section-nav) stands right before the main
+     element, the first element of the body of a guest page: it links the
+     sections of the page that have a label (nav) and is left out when none has.
      The class of the html element names the audience (guest or staff): the style
      sheet aligns and sizes the page by it. The staff bar and the footer with the
      contact on the night exist on the staff page alone, outside the sections, so
@@ -35,7 +38,7 @@
 <header class="staff-bar">
   <p class="container staff-bar__inner"><strong class="staff-bar__title">Staff version · not for guests</strong><!-- if:staff.updated --> <span class="staff-bar__updated">updated {{staff.updated}}</span><!-- endif --></p>
 </header>
-<!-- endif -->
+<!-- endif --><!-- if:nav --><!-- include:partials/section-nav --><!-- endif -->
 <main class="page">
 <!-- include:partials/sections -->
 </main>

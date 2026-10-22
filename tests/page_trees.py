@@ -12,7 +12,9 @@ refuses a node whose fields are not exactly those of its kind, so a tree here
 cannot drift from the contract.
 
 The data is fictional and follows the design of the pages: the dinner of
-Ivan & Vera at a bistro, an L-shaped table of sixteen seats.  The trees:
+Ivan & Vera at a bistro, an L-shaped table of sixteen seats.  Only one tree
+has the line of the sections (`nav`): the others render as pages without it.
+The trees:
 
 * `guest_plus_one` - Olga with her +1 at seats 8 and 9, marked on the plan of
   the table with "You" and "+1";
@@ -23,7 +25,8 @@ Ivan & Vera at a bistro, an L-shaped table of sixteen seats.  The trees:
   the page reads the same without a drawing);
 * `guest_parts` - Nina with her +1 at seats 15 and 16, without a plan: the
   food in one section of two parts under their headings (the set cards
-  under the second one a level lower), a section of texts under headings;
+  under the second one a level lower), a section of texts under headings,
+  the line of the sections over it all (the signature has no link there);
 * `staff` - the staff page: the legend, the plan with the badges of the
   dietary notes, every seat (a free and a reserved one among them, a +1 with
   a name and one without), the swaps, a dish for the staff only, the notes
@@ -45,7 +48,8 @@ WIDGET_COMMON_FIELDS = ("type", "domId", "labelledBy")
 #: The fields of every kind of node; a widget is of the kind `widget:<type>`.
 NODES = {
     "root": ("isStaff", "coupleNames", "event", "assetsPath", "faviconPath", "themeColor",
-             "staff", "counters", "sections"),
+             "staff", "counters", "nav", "sections"),
+    "navItem": ("label", "target"),
     "event": ("title", "when", "place"),
     "staff": ("updated", "contact", "reminder"),
     "counters": ("guests", "notes", "guestsText", "notesText", "tableLabel"),
@@ -79,6 +83,7 @@ CHILDREN = {
     ("root", "event"): "event",
     ("root", "staff"): "staff",
     ("root", "counters"): "counters",
+    ("root", "nav"): "navItem",
     ("root", "sections"): "section",
     ("section", "widgets"): "widget",
     ("widget:seating", "scheme"): "scheme",
@@ -150,14 +155,16 @@ ASSETS = "/assets"
 
 
 def root(*, staff_page: bool, sections: list, staff: dict | None = None,
-         counters: dict | None = None) -> dict:
-    """The root of a page; a guest's page has the staff fields empty."""
+         counters: dict | None = None, nav: tuple = ()) -> dict:
+    """The root of a page; a guest's page has the staff fields empty.  `nav`
+    is (label, id of a section) of every link of the line of the sections."""
     return node(
         "root", isStaff=staff_page, coupleNames=COUPLE, event=node("event", **EVENT),
         assetsPath=ASSETS, faviconPath=f"{ASSETS}/favicon.svg", themeColor="#f1f2f4",
         staff=staff or node("staff", updated="", contact="", reminder=""),
         counters=counters or node("counters", guests=0, notes=0, guestsText="", notesText="",
                                   tableLabel=""),
+        nav=[node("navItem", label=label, target=f"s-{section_id}") for label, section_id in nav],
         sections=sections,
     )
 
@@ -455,7 +462,8 @@ def guest_parts() -> dict:
     for number, (title, text) in enumerate(INFO):
         info += [heading("info", 2 * number + 1, title),
                  widget("text", "info", 2 * number + 2, text=text, variant="body")]
-    return root(staff_page=False, sections=[
+    nav = (("Seats", "seats"), ("Food", "food"), ("Drinks", "drinks"), ("Info", "info"))
+    return root(staff_page=False, nav=nav, sections=[
         cover(),
         section("seats", "Your seats", widgets=[seating(
             "seats", my_seats=((15, "you"), (16, "plusOne")), seat_label="Seats 15 & 16",

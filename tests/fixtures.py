@@ -19,7 +19,8 @@ Each function returns a fresh `(menu, guests)` pair that a test may change.
 * `parts` - `reserved19` with the starters and the main course in one
   section of two parts under their headings (the staff page has eyebrows of
   its own) and a section of short texts under headings after the drinks,
-  its last part for the staff only.
+  its last part for the staff only; the seats, the food, the drinks and the
+  texts have their labels in the line of the sections, the signature none.
 
 The dietary notes name what to leave out ("no nuts"), never a reason.
 """
@@ -653,6 +654,7 @@ def parts() -> tuple[dict, list]:
     food = {
         "id": "food",
         "title": "Food",
+        "nav": "Food",
         "widgets": [
             {"type": "heading", "title": "Starters", "eyebrow": starters["eyebrow"], "staff": starters["staff"]},
             *starters["widgets"],
@@ -660,12 +662,14 @@ def parts() -> tuple[dict, list]:
             *main["widgets"],
         ],
     }
-    info = {"id": "info", "title": "Good to know", "widgets": []}
+    info = {"id": "info", "title": "Good to know", "nav": "Info", "widgets": []}
     for title, text, audience in INFO:
         extra = {} if audience == "all" else {"audience": audience}
         info["widgets"] += [{"type": "heading", "title": title, **extra}, {"type": "text", "text": text, **extra}]
     sections[2:4] = [food]
     sections.insert(len(sections) - 1, info)
+    sections[1]["nav"] = "Seats"
+    sections[3]["nav"] = "Drinks"
     for record in guests:
         overrides = record.get("sections") or {}
         if "main" in overrides:

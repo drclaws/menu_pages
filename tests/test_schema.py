@@ -419,6 +419,40 @@ def _(menu, guests):
     del info(menu)[1]
 
 
+# --------------------------------------------------------------------------
+# The labels of the line of the sections
+# --------------------------------------------------------------------------
+
+
+@case("label_of_the_cover", base="parts", errors=[M + "unknown field 'sections[0].nav'"])
+def _(menu, guests):
+    menu["sections"][0]["nav"] = "Top"
+
+
+@case("empty_label", base="parts", errors=[
+    M + "field 'sections[2].nav' must not be empty: leave the field out for a section without a link in the "
+    "line of the sections"])
+def _(menu, guests):
+    menu["sections"][2]["nav"] = " "
+
+
+@case("label_on_two_lines", base="parts",
+      errors=[M + "field 'sections[2].nav' must be a single line (no line breaks)"])
+def _(menu, guests):
+    menu["sections"][2]["nav"] = "Food\nand wine"
+
+
+@case("label_that_is_no_text", base="parts", errors=[M + "field 'sections[3].nav' must be a string, got a boolean"])
+def _(menu, guests):
+    menu["sections"][3]["nav"] = True
+
+
+@case("label_repeated", base="parts", warnings=[
+    M + "field 'sections[4].nav' repeats the label of sections[2] in the line of the sections (letter case aside)"])
+def _(menu, guests):
+    menu["sections"][4]["nav"] = " FOOD"
+
+
 @case("misspelt_heading_type", base="parts", errors=[
     M + "field 'sections[2].widgets[3].type' names an unknown widget type 'headng' (did you mean 'heading'?); "
     "known: text, seating, dishes, sets, drinks, heading"])
@@ -797,6 +831,19 @@ class FixturesTest(unittest.TestCase):
         menu, guests = fixtures.reserved19()
         del guests[12]["token"]
         self.assertEqual(check(menu, guests)[1:], ([G(13) + "field 'token' is required"], []))
+
+    def test_labels_of_the_line_on_any_section_but_the_cover(self):
+        # a section for the staff or for the guests only may have a label:
+        # the page that shows it links it
+        menu, guests = fixtures.parts()
+        menu["sections"].insert(4, {**kitchen_section(), "nav": "Kitchen"})
+        menu["sections"][-1]["nav"] = "Thanks"
+        self.assertEqual(full_check(menu, guests), ([], []))
+        # the same label once in a lower and once in an upper case: one warning
+        menu["sections"][-1]["nav"] = "kitchen"
+        self.assertEqual(full_check(menu, guests), ([], [
+            M + "field 'sections[6].nav' repeats the label of sections[4] in the line of the sections "
+            "(letter case aside)"]))
 
 
 # --------------------------------------------------------------------------

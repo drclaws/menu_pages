@@ -306,6 +306,7 @@
     },
     {
       "id": "seats",
+      "nav": "Seats",
       "widgets": [
         {
           "type": "seating",
@@ -318,6 +319,7 @@
     {
       "id": "food",
       "title": "Food",
+      "nav": "Food",
       "widgets": [
         {
           "type": "heading",
@@ -374,6 +376,7 @@
     {
       "id": "drinks",
       "title": "Drinks",
+      "nav": "Drinks",
       "staff": {
         "eyebrow": "What to serve and when"
       },
@@ -427,6 +430,7 @@
     {
       "id": "info",
       "title": "Good to know",
+      "nav": "Info",
       "widgets": [
         {
           "type": "heading",

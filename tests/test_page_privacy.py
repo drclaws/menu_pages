@@ -93,7 +93,7 @@ def staff_only_parts(menu: dict) -> list:
 
 #: The fields of a section or a widget that hold texts (the others hold ids
 #: and choices, which a guest page may share).
-TEXT_FIELDS = ("text", "title", "eyebrow", "note", "footnote")
+TEXT_FIELDS = ("text", "title", "eyebrow", "note", "footnote", "nav")
 
 
 def texts_of(value) -> set[str]:
@@ -206,6 +206,7 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
     menu["sections"].append({
         "id": "kitchen",
         "title": "Kitchen",
+        "nav": "Kitchen line",
         "audience": "staff",
         "widgets": [{"type": "text", "text": "Added staff section"}],
     })
@@ -374,6 +375,18 @@ class StructureTest(unittest.TestCase):
                         if widget["type"] == "drinks":
                             self.assertEqual(widget["groups"], [])
 
+    def test_the_line_of_a_guest_has_no_label_of_a_staff_section(self):
+        menu, guests = fixtures.parts()
+        menu["sections"].insert(4, {"id": "kitchen", "title": "Kitchen", "nav": "Kitchen line", "audience": "staff",
+                                    "widgets": [{"type": "text", "text": "Plates warm by 19:00."}]})
+        trees = build(menu, guests)
+        self.assertNotIn("Kitchen line", dump(_page.public_menu(menu)))
+        for page in trees.guests:
+            with self.subTest(record=page.number):
+                self.assertEqual([item["label"] for item in page.tree["nav"]], ["Seats", "Food", "Drinks", "Info"])
+                self.assertNotIn("Kitchen line", dump(page.tree))
+        self.assertIn({"label": "Kitchen line", "target": "s-kitchen"}, trees.staff.tree["nav"])
+
     def test_the_projections_hold_no_private_key(self):
         for name, make in fixtures.SETS.items():
             with self.subTest(fixture=name):
@@ -418,7 +431,8 @@ class StructureTest(unittest.TestCase):
             ("_couple", "members"),
         }
         for function in (_page.public_menu, _page._public_widget, _page._public_dish, _page._couple,
-                         _page.own_record, _page._GuestPage, _page._parts, _page._heading, _page._set):
+                         _page.own_record, _page._GuestPage, _page._parts, _page._heading, _page._set,
+                         _page._add_section):
             tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
             for node in ast.walk(tree):
                 key = None

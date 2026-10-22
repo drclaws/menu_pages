@@ -77,9 +77,11 @@ DRINK_FIELDS = ("category", "name", "details", "servedWith", "staff")
 DRINK_STAFF_FIELDS = ("bottles", "serving", "swaps")
 
 SECTION_TYPES = ("cover", "custom")
+#: `nav` is the short label of a section in the line of the sections at the
+#: top of a page; a section without one has no link there.
 SECTION_FIELDS = {
     "cover": ("id", "type"),
-    "custom": ("id", "type", "visible", "audience", "title", "eyebrow", "staff", "widgets"),
+    "custom": ("id", "type", "visible", "audience", "title", "eyebrow", "nav", "staff", "widgets"),
 }
 SECTION_STAFF_FIELDS = ("title", "eyebrow")
 #: `heading` is the head of a part of a section: what follows it, up to the
@@ -105,6 +107,8 @@ WIDGET_STAFF_FIELDS = {
 }
 #: Nothing of a section stands under such a heading on any page.
 _EMPTY_HEADING = "nothing stands under the heading"
+#: What a section without `nav` is.
+_NO_LABEL = "leave the field out for a section without a link in the line of the sections"
 TEXT_VARIANTS = ("body", "lead", "card", "signature")
 GROUP_FIELDS = ("title", "layout", "items")
 GROUP_LAYOUTS = ("list", "inline")
@@ -688,6 +692,7 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
     seating = 0
     covers: list[int] = []
     positions: dict[str, int] = {}
+    labels: dict[str, int] = {}  # a label of the line in lower case -> its section
     for position, section in enumerate(sections):
         parts = ("sections", position)
         section = check.object(section, parts)
@@ -725,6 +730,19 @@ def _check_sections(check: _Checker, menu: dict, index: MenuIndex) -> None:
         # page ("Your seat" for a guest, "Seating and dietary notes" for the staff)
         _line(check, section, "title", parts, required=not has_seating)
         _line(check, section, "eyebrow", parts)
+        label = _line(check, section, "nav", parts)
+        if isinstance(section.get("nav"), str) and not section["nav"].strip():
+            # an empty text is "not set" elsewhere; a label is given or left out
+            check.error((*parts, "nav"), f"must not be empty: {_NO_LABEL}")
+        elif label is not MISSING:
+            key = " ".join(label.split()).lower()
+            if key in labels:
+                check.warning(
+                    (*parts, "nav"),
+                    f"repeats the label of sections[{labels[key]}] in the line of the sections (letter case aside)",
+                )
+            else:
+                labels[key] = position
         staff = _object(check, section, "staff", parts, SECTION_STAFF_FIELDS)
         if staff is not None:
             if audience == "guest":

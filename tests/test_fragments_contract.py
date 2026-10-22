@@ -38,8 +38,8 @@ APP_JS = ROOT / "assets" / "app.js"
 PUBLISHED = frozenset({"assets/app.css", "assets/app.js", "assets/favicon.svg"})
 
 #: The partials: the shared pieces that no value of the data can choose.
-PARTIALS = ("dish-item", "legend", "pills", "scheme", "seat-table", "section-head",
-            "section-note", "sections")
+PARTIALS = ("dish-item", "legend", "pills", "scheme", "section-head", "section-nav",
+            "section-note", "sections", "seat-table")
 
 #: The kinds of node of the plan of the table.
 SCHEME_KINDS = ("scheme", "schemeCouple", "schemeSeat", "schemeBadge", "schemeLabel")
@@ -250,6 +250,15 @@ def tabs_hooks() -> list[str]:
     return sorted(set(hooks))
 
 
+def section_nav_hooks() -> list[str]:
+    """The data attributes the sectionNav module of the script looks for."""
+    source = APP_JS.read_text(encoding="utf-8")
+    module = source[source.index("Module sectionNav"):]
+    hooks = re.findall(r"'\[(data-[a-z-]+)\]'", module)
+    assert hooks, "no hooks in the sectionNav module"
+    return sorted(set(hooks))
+
+
 # --- the trees and the files ---------------------------------------------------
 
 class TreeTests(unittest.TestCase):
@@ -425,16 +434,24 @@ class FragmentFilesTests(unittest.TestCase):
                       self.sources["sections/custom"])
         self.assertNotIn("data-reveal", TEMPLATE.read_text(encoding="utf-8"))
 
-    def test_no_links_in_the_markup(self):
-        # the pages lead nowhere: the only addresses are the shared files in <head>
+    def test_the_only_links_lead_to_the_sections_of_the_page(self):
+        # the pages lead nowhere else: the other addresses are the shared
+        # files in <head>; the line of the sections links the parts of the page
         sources = dict(self.sources, template=TEMPLATE.read_text(encoding="utf-8"))
+        expected = {"template": ["{{faviconPath}}", "{{assetsPath}}/app.css", "{{assetsPath}}/app.js"],
+                    "partials/section-nav": ["#{{.target}}"]}
         for name, source in sources.items():
             markup = re.sub(r"<!--.*?-->", "", source, flags=re.S)
             with self.subTest(file=name):
-                self.assertNotRegex(markup, r"(?i)<(?:a|area)[\s/>]")
+                self.assertNotRegex(markup, r"(?i)<area[\s/>]")
+                links = re.findall(r"(?i)<a[\s/>][^>]*>", markup)
+                self.assertEqual(links, ['<a class="section-nav__link" href="#{{.target}}" data-section-nav-link>']
+                                 if name == "partials/section-nav" else [])
                 addresses = re.findall(r'(?i)\b(?:href|src)\s*=\s*"([^"]*)"', markup)
-                self.assertEqual(addresses, ["{{faviconPath}}", "{{assetsPath}}/app.css",
-                                             "{{assetsPath}}/app.js"] if name == "template" else [])
+                self.assertEqual(addresses, expected.get(name, []))
+        # the template includes the line only when there is something to link
+        self.assertIn("<!-- endif --><!-- if:nav --><!-- include:partials/section-nav --><!-- endif -->\n"
+                      '<main class="page">', sources["template"])
 
     def test_no_styles_or_inline_scripts_in_the_markup(self):
         sources = dict(self.sources, template=TEMPLATE.read_text(encoding="utf-8"))
@@ -453,7 +470,7 @@ class FragmentFilesTests(unittest.TestCase):
         markup = "".join(re.sub(r"<!--.*?-->", "", source, flags=re.S)
                          for source in self.sources.values())
         markup += TEMPLATE.read_text(encoding="utf-8")
-        for word in STAFF_WORDS + SCHEME_WORDS + ("Paired with", "—", "Dinner menu · "):
+        for word in STAFF_WORDS + SCHEME_WORDS + ("Paired with", "—", "Dinner menu · ", 'aria-label="Sections"'):
             with self.subTest(word=word):
                 self.assertIn(word, markup)
         # the words of the plan are in its partial: the tree holds none of them
@@ -672,6 +689,65 @@ class PageTests(unittest.TestCase):
         undated = page(updated="")
         self.assertEqual(visible_text(element(undated, "staff-bar")),
                          "Staff version · not for guests")
+
+    def test_the_line_of_the_sections(self):
+        page = self.pages["guest-parts"]
+        line = element(page, "section-nav")
+        # the first element of the body of a guest page, right before main
+        self.assertTrue(page[page.index("<body>"):].replace("<body>", "", 1).lstrip().startswith(line))
+        self.assertTrue(page.index(line) < page.index('<main class="page">'))
+        self.assertEqual(line,
+                         '<nav class="section-nav" aria-label="Sections" data-section-nav>\n'
+                         '  <div class="container section-nav__inner">\n'
+                         '    <ul class="section-nav__list" role="list" data-section-nav-list>\n'
+                         '      <li class="section-nav__item"><a class="section-nav__link" href="#s-seats" '
+                         'data-section-nav-link>Seats</a></li>\n'
+                         '      <li class="section-nav__item"><a class="section-nav__link" href="#s-food" '
+                         'data-section-nav-link>Food</a></li>\n'
+                         '      <li class="section-nav__item"><a class="section-nav__link" href="#s-drinks" '
+                         'data-section-nav-link>Drinks</a></li>\n'
+                         '      <li class="section-nav__item"><a class="section-nav__link" href="#s-info" '
+                         'data-section-nav-link>Info</a></li>\n'
+                         "    </ul>\n  </div>\n</nav>")
+        # every link leads to a section of the page; the signature has none
+        ids = Outline(page).ids
+        targets = re.findall(r'href="#([^"]+)"', line)
+        self.assertTrue(set(targets) <= set(ids))
+        self.assertNotIn("s-signature", targets)
+        self.assertIn("s-signature", ids)
+        # the hooks of the script are those of the markup
+        self.assertEqual(section_nav_hooks(), ["data-section-nav", "data-section-nav-link",
+                                               "data-section-nav-list"])
+        for hook in section_nav_hooks():
+            self.assertIn(f" {hook}>", line)
+
+    def test_a_page_without_a_label_has_no_line(self):
+        # nothing of the line, not even an empty line of text
+        for name, page in self.pages.items():
+            if name == "guest-parts":
+                continue
+            with self.subTest(page=name):
+                self.assertNotIn("section-nav", page)
+                self.assertNotIn("<nav", page)
+                if name == "staff":
+                    self.assertIn('</header>\n\n<main class="page">', page)
+                else:
+                    self.assertIn('<body>\n\n\n\n<main class="page">', page)
+
+    def test_the_line_of_the_staff_page_follows_the_staff_bar(self):
+        tree = T.staff()
+        tree["nav"] = [T.node("navItem", label=label, target=f"s-{section_id}")
+                       for label, section_id in (("Seats", "seats"), ("Starters", "starters"),
+                                                 ("Main course", "main"), ("Drinks", "drinks"))]
+        page = render_strict(tree, self.template)
+        self.assertEqual(html_problems(page), [])
+        bar, line = element(page, "staff-bar"), element(page, "section-nav")
+        self.assertTrue(page.index(bar) < page.index(line) < page.index('<main class="page">'))
+        self.assertEqual(re.findall(r'href="#([^"]+)" data-section-nav-link>([^<]*)</a>', line),
+                         [("s-seats", "Seats"), ("s-starters", "Starters"), ("s-main", "Main course"),
+                          ("s-drinks", "Drinks")])
+        self.assertEqual([target for name, target in Outline(page).references
+                          if name == "href" and target not in Outline(page).ids], [])
 
     def test_a_guest_page_has_no_staff_parts(self):
         for name, page in self.guest_pages().items():

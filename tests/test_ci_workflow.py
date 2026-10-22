@@ -479,6 +479,8 @@ class CiWorkflowTest(unittest.TestCase):
             page = next((work / "dist-plain").glob("*/index.html"))
             token = page.parent.name
             original = page.read_text(encoding="utf-8")
+            # the pages that passed above have the links of the line of the sections
+            self.assertIn('<a class="section-nav__link" href="#s-seats"', original)
 
             def with_body(markup):
                 return original.replace("</main>", f"{markup}</main>", 1)

@@ -399,7 +399,28 @@ class SectionNavStylesTest(unittest.TestCase):
         # the canvas in the colour of the line, a body as tall as the screen: on the screen
         screen = self.media(self.base, "screen")
         self.assertEqual(screen["html.menu"], "background-color: var(--color-surface);")
-        self.assertEqual(screen["html.menu body"], "min-block-size: var(--viewport-height-dynamic);")
+        self.assertIn("min-block-size: var(--viewport-height-dynamic);", screen["html.menu body"])
+
+    def test_the_end_of_the_page_is_on_its_background(self):
+        # the margin of the last block stays inside the body, on the background
+        # of the page, and the safe area at the foot of the screen adds to it
+        screen = self.media(self.base, "screen")
+        self.assertEqual(screen["html.menu body"],
+                         "display: flow-root; min-block-size: var(--viewport-height-dynamic); "
+                         "padding-block-end: var(--safe-inset-bottom);")
+        self.assertNotIn("flow-root", self.outside)
+        # that margin is the air between two sections, after a section or the staff footer
+        components = rules(self.components)
+        self.assertEqual(components[".section"], "margin-block: var(--space-section);")
+        self.assertEqual(components[".page-footer"], "margin-block: var(--space-section);")
+        # the body that scrolls on a touch screen keeps the padding
+        touch = self.media(self.base, "screen and (pointer: coarse)")
+        self.assertNotRegex(touch["html.menu body"], r"(?<![\w-])padding[\w-]*:")
+        # print keeps the end of the document as it is
+        for selector, body in self.print.items():
+            if "body" in selector:
+                with self.subTest(selector=selector):
+                    self.assertNotRegex(body, r"(?<![\w-])(?:display|padding[\w-]*):")
 
     def test_the_fill_above_the_line_and_the_staff_bar_over_it(self):
         components = rules(self.components)

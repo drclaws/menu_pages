@@ -8,15 +8,21 @@ have passed the checks of `menu_tools._schema`.
 Privacy by construction.  A guest page is built from two projections only:
 `public_menu` (the shared texts outside the `staff` keys and outside the
 parts for the staff only, the names and ingredients of the dishes the guests
-see, their sets and the guest fields of their drinks, the label and the seats
-of the couple, the table) and `own_record` (the name, the seat numbers, which
-of them a companion takes and the name of that companion, the switches and
-notes of the sections).  The names of the companions of the own record are
-in the label of its seats (`whoLabel`) and nowhere else on the page.
-Tokens, other records, requirements, allergens and the names of the other
-seats never reach the code of a guest page.  The staff page reads the whole
-menu and the records without their tokens and notes.  No page holds a token:
-the token of a record names the directory of its page and nothing else.
+see, their sets and the guest fields of their drinks, the table) and
+`own_record` (the name, the seat numbers, which of them a companion takes,
+the names of the seats, the switches and notes of the sections).  The names
+of the seats of the own record are in the names under the plan (`names`)
+and in the text of the plan (`scheme.mine`) and nowhere else on the page.
+Tokens, other records, requirements, allergens, the couple and the names of
+the other seats never reach the code of a guest page.  The staff page reads
+the whole menu and the records without their tokens and notes.  No page
+holds a token: the token of a record names the directory of its page and
+nothing else.
+
+A guest page names no seat by its number: its plan of the table shows the
+seats of the record in colours of their own (`_table.SEAT_COLOURS`) and the
+names under the plan in the same colours, in the order of the seats of the
+record.
 
 The line of the sections at the top of a page (`nav` of the root) links the
 sections of that page that have a label (`nav` of a section), in their
@@ -45,7 +51,7 @@ from typing import Any, NamedTuple
 from menu_tools import _table, _words
 from menu_tools._schema import EVENT_FIELDS, MENU_FILE, guest_where
 
-#: The "You" and "+1" marks are given only up to this many seats of a record.
+#: The marks of `mySeats` are given only up to this many seats of a record.
 MAX_MARKED_SEATS = 2
 #: `mySeats[].mark`: the guest's own seat, the seat of a companion, no mark.
 MARK_YOU = "you"
@@ -210,8 +216,7 @@ def _seating(base: dict) -> dict:
         **base,
         "scheme": None,
         "mySeats": [],
-        "seatLabel": "",
-        "whoLabel": "",
+        "names": [],
         "legend": [],
         "rows": [],
         "footnote": "",
@@ -238,15 +243,13 @@ def public_menu(menu: dict) -> dict:
     Sections and widgets for the staff only are left out (a widget keeps its
     place as None: the widgets of a section are numbered by their position
     in the data); so are the `staff` keys, the requirements, the allergens,
-    the names and requirements of the couple, the fields of the dishes,
-    sets and drinks other than those a guest sees, and every dish, set or
-    drink no part for the guests refers to.
+    the couple (the plan of a guest does not show it), the fields of the
+    dishes, sets and drinks other than those a guest sees, and every dish,
+    set or drink no part for the guests refers to.
     """
-    couple = menu.get("couple") or {}
     public: dict[str, Any] = {
         "coupleNames": menu["coupleNames"],
         "event": {key: menu["event"][key] for key in EVENT_FIELDS},
-        "couple": _couple(couple),
         "table": menu.get("table"),
         "dishes": {},
         "sets": {},
@@ -331,11 +334,9 @@ def _public_dish(menu: dict, dish_id: str, public: dict) -> None:
 def own_record(record: dict) -> dict:
     """The part of a record its own page is built from.
 
-    The token, the requirements of the seats and the names of the seats
-    other than the companions are left out: the page of a guest shows none
-    of them.  `companion` of a seat is the name of the companion on a +1
-    seat ("" without one, and on every other seat): the label of the seats
-    names the companion by it, or "your guest" when it is empty.
+    The token and the requirements of the seats are left out: the page of a
+    guest shows neither.  `name` of a seat is its name ("" without one): the
+    names under the plan show who sits at which seat of the record.
     """
     sections = {}
     for section_id, override in (record.get("sections") or {}).items():
@@ -353,7 +354,7 @@ def own_record(record: dict) -> dict:
             {
                 "number": seat["number"],
                 "plusOne": seat.get("plusOne") is True,
-                "companion": _text(seat.get("name")) if seat.get("plusOne") is True else "",
+                "name": _text(seat.get("name")),
             }
             for seat in record["seats"]
         ],
@@ -461,10 +462,11 @@ class _GuestPage:
         raise ValueError(f"unknown widget type: {kind}")  # pragma: no cover - checked data
 
     def seating(self, widget: dict, base: dict) -> dict:
+        """The seats of the record: a name per seat in the colour of its
+        place in the record, and the plan with the seats in those colours."""
         seats = self.own["seats"]
         numbers = [seat["number"] for seat in seats]
-        plus_ones = [seat["number"] for seat in seats if seat["plusOne"]]
-        companions = [seat["companion"] for seat in seats if seat["plusOne"]]
+        names = _words.seat_names(self.own["name"], [seat["name"] for seat in seats])
         marked = len(seats) <= MAX_MARKED_SEATS
 
         def mark(position: int, seat: dict) -> str:
@@ -477,17 +479,13 @@ class _GuestPage:
         mine = [{"number": seat["number"], "mark": mark(position, seat)} for position, seat in enumerate(seats)]
         tree = _seating(base)
         tree["mySeats"] = sorted(mine, key=lambda item: item["number"])
-        tree["seatLabel"] = _words.seat_label(numbers)
-        tree["whoLabel"] = _words.who_label(self.own["name"], companions)
+        # checked data: a record has no more seats than there are colours
+        tree["names"] = [
+            {"name": name, "colour": _table.SEAT_COLOURS[position]} for position, name in enumerate(names)
+        ]
         table = self.public["table"]
         if table is not None and widget["showScheme"]:
-            tree["scheme"] = _table.guest_scheme(
-                table,
-                own_seats=numbers,
-                plus_one_seats=plus_ones,
-                mine_text=_words.mine_text(numbers),
-                **self.public["couple"],
-            )
+            tree["scheme"] = _table.guest_scheme(table, own_seats=numbers, mine_text=_words.colour_key(names))
         return tree
 
 
@@ -759,8 +757,8 @@ def build_trees(menu: dict, guests: list, report: Any, settings: Settings = DEFA
     """The trees of every page of checked data.
 
     A guest page whose table plan cannot be laid out (`_table.TableError`,
-    "seat 5: no room for the '+1' label") is an error of its record, reported
-    with the seat numbers only, and has no tree.  The staff tree is built
+    which names seat numbers at most; checked data never gets one) is an
+    error of its record and has no tree.  The staff tree is built
     even without a staff record, for `Trees.usage`, but returned only with
     one.
     """

@@ -5,15 +5,16 @@ else.  The differential test changes everything a guest must not see (the
 other records, every `staff` key, the texts of the headings for the staff
 among them, the requirements and allergens, the
 sections and widgets for the staff only, the dish for the staff only, the
-names and dietary notes of the seats, which seats are taken and which are
-reserved) and expects the very same tree of
-every guest.  The names of the companions of the own record (its +1 seats)
-are the one part of the seats a guest page shows, in the label of its seats
-alone: the differential test keeps them, and a change of them changes that
-page and no other.  The string tests look for those values, and for every
-token (the own one too), in the trees; the structure tests check the fields a
-guest tree leaves empty and the code of the guest page for the keys it may
-not read.
+couple - its names, roles, seats, label and arm -, the names of the seats of
+the other records, the dietary notes of every seat, which seats are taken
+and which are reserved) and expects the very same tree of every guest.  The
+names of the seats of the own record are the one part of the seats a guest
+page shows, in the names under the plan and in the text of the plan alone:
+the differential test keeps them, and a change of them changes that page and
+no other.  The string tests look for those values, and for every token (the
+own one too), in the trees; the structure tests check the fields a guest
+tree leaves empty and the code of the guest page for the keys it may not
+read.
 """
 
 import ast
@@ -141,9 +142,9 @@ def forbidden(menu: dict, guests: list, number: int) -> set[str]:
     return {item for item in found if item.strip()}
 
 
-def companions(record: dict) -> list[str]:
-    """The names of the companions of a record: its +1 seats with a name."""
-    return [seat["name"] for seat in record.get("seats", []) if seat.get("plusOne") is True and seat.get("name")]
+def seat_names(record: dict) -> list[str]:
+    """The names of the seats of a record (of its seats with a name)."""
+    return [seat["name"] for seat in record.get("seats", []) if seat.get("name")]
 
 
 def occurs(needle: str, haystack: str) -> bool:
@@ -191,11 +192,17 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
         requirement.pop("avoids", None)
     for allergen in (menu.get("allergens") or {}).values():
         allergen["label"] = "changed allergen"
-    # the couple: names, roles and dietary notes; their seats stay
-    for member in (menu.get("couple") or {}).get("members", []):
+    # the couple: names, roles and dietary notes, label and arm (the plan of
+    # a guest has no couple); their seats move below
+    couple = menu.get("couple") or {}
+    for member in couple.get("members", []):
         member["name"] = "Changed"
         member["role"] = "changed role"
         member.pop("requirements", None)
+    if couple.get("label"):
+        couple["label"] = "Changed label"
+    if menu.get("table") and couple.get("members"):
+        couple["arm"] = menu["table"]["arms"][-1]["id"]
     # the parts for the staff only, and one more of them
     for part in staff_only_parts(menu):
         for widget in [part] + part.get("widgets", []):
@@ -249,16 +256,21 @@ def scramble(menu: dict, guests: list, keep: int) -> None:
     else:
         free = [max(taken) + 1, max(taken) + 2]
     if others and free:
-        others[0]["seats"].append({"number": free.pop(0), "name": "Changed seat"})
+        receiver = next((record for record in others if len(record["seats"]) < len(_table.SEAT_COLOURS)), None)
+        if receiver is not None:
+            receiver["seats"].append({"number": free.pop(0), "name": "Changed seat"})
+    # the couple moves to the first free seat (a free seat of its own without a table)
+    if couple.get("members") and free:
+        couple["members"][-1]["seat"] = free.pop(0)
     if free:
         menu["reservedSeats"] = [free[0]]
-    # the names and dietary notes of every seat, the own ones included; only
-    # the names of the own companions stay (or their lack of one): the label
-    # of the own seats shows them
+    # the names of the seats of the other records and the dietary notes of
+    # every seat; the names of the own seats stay (or their lack of one): the
+    # names under the plan show them
     requirement_ids = list(menu.get("requirements") or {})
     for position, record in enumerate(guests, start=1):
         for seat in record.get("seats", []):
-            if position != keep or seat.get("plusOne") is not True:
+            if position != keep:
                 seat["name"] = "Changed seat"
             seat["requirements"] = requirement_ids[:1]
 
@@ -275,28 +287,30 @@ class DifferentialTest(unittest.TestCase):
                     after = guest_trees(build(changed_menu, changed_guests))
                     self.assertEqual(dump(after[number]), dump(before[number]))
 
-    def test_the_companions_of_a_record_reach_its_own_page_alone(self):
-        # a companion of one record given a name, or a name taken away: the
-        # page of that record changes, every other page stays the same
+    def test_the_names_of_the_seats_of_a_record_reach_its_own_page_alone(self):
+        # a seat of one record given another name, a name, or a +1 without
+        # its name: the page of that record changes, every other page stays
+        # the same
         checked = 0
         for name, make in fixtures.SETS.items():
             menu, guests = make()
             before = guest_trees(build(menu, guests))
             for number in before:
-                if not any(seat.get("plusOne") is True for seat in guests[number - 1]["seats"]):
-                    continue
-                with self.subTest(fixture=name, record=number):
-                    changed_menu, changed_guests = make()
-                    for seat in changed_guests[number - 1]["seats"]:
-                        if seat.get("plusOne") is True and seat.pop("name", None) is None:
-                            seat["name"] = "Changed companion"
-                    after = guest_trees(build(changed_menu, changed_guests))
-                    self.assertNotEqual(dump(after[number]), dump(before[number]))
-                    for other in before:
-                        if other != number:
-                            self.assertEqual(dump(after[other]), dump(before[other]))
-                    checked += 1
-        self.assertGreater(checked, 5)
+                for position in range(len(guests[number - 1]["seats"])):
+                    with self.subTest(fixture=name, record=number, seat=position):
+                        changed_menu, changed_guests = make()
+                        seat = changed_guests[number - 1]["seats"][position]
+                        if seat.get("plusOne") is True and "name" in seat:
+                            del seat["name"]
+                        else:
+                            seat["name"] = "Changed seat"
+                        after = guest_trees(build(changed_menu, changed_guests))
+                        self.assertNotEqual(dump(after[number]), dump(before[number]))
+                        for other in before:
+                            if other != number:
+                                self.assertEqual(dump(after[other]), dump(before[other]))
+                        checked += 1
+        self.assertGreater(checked, 20)
 
     def test_the_changes_reach_the_staff_page(self):
         # the changes are real: the staff tree differs in every fixture
@@ -323,9 +337,9 @@ class StringsTest(unittest.TestCase):
             for page in trees.guests:
                 text = dump(page.tree)
                 # what the shared texts and the own record hold is allowed:
-                # its name and the names of its companions
+                # its name and the names of its seats
                 record = guests[page.number - 1]
-                allowed = "\n".join([dump(_page.public_menu(menu)), record["name"], *companions(record)])
+                allowed = "\n".join([dump(_page.public_menu(menu)), record["name"], *seat_names(record)])
                 for value in forbidden(menu, guests, page.number):
                     if occurs(value, allowed):
                         continue
@@ -334,12 +348,13 @@ class StringsTest(unittest.TestCase):
                         self.assertFalse(occurs(value, text), "a value a guest must not see")
         self.assertGreater(checked, 500)
 
-    def test_the_own_companions_are_named_in_the_label_of_the_seats_alone(self):
+    def test_the_own_seats_are_named_under_the_plan_and_in_its_text_alone(self):
         checked = 0
         for name, make in fixtures.SETS.items():
             menu, guests = make()
             for page in build(menu, guests).guests:
-                named = companions(guests[page.number - 1])
+                record = guests[page.number - 1]
+                named = [person for person in seat_names(record) if not occurs(person, record["name"])]
                 if not named:
                     continue
                 rest = json.loads(dump(page.tree))
@@ -347,13 +362,15 @@ class StringsTest(unittest.TestCase):
                 for item in rest["sections"]:
                     for widget in item["widgets"]:
                         if widget["type"] == "seating":
-                            labels.append(widget.pop("whoLabel"))
-                for companion in named:
+                            labels.append(" ".join(entry["name"] for entry in widget.pop("names")))
+                            if widget["scheme"] is not None:
+                                labels.append(widget["scheme"].pop("mine"))
+                for person in named:
                     checked += 1
-                    with self.subTest(fixture=name, record=page.number, companion=companion):
+                    with self.subTest(fixture=name, record=page.number, person=person):
                         self.assertTrue(labels)
-                        self.assertTrue(all(occurs(companion, label) for label in labels))
-                        self.assertFalse(occurs(companion, dump(rest)))
+                        self.assertTrue(all(occurs(person, label) for label in labels))
+                        self.assertFalse(occurs(person, dump(rest)))
         self.assertGreaterEqual(checked, 5)
 
     def test_a_guest_tree_holds_no_token(self):
@@ -405,6 +422,9 @@ class StructureTest(unittest.TestCase):
                 self.assertEqual(widget["scheme"]["badges"], [])
                 self.assertFalse(widget["scheme"]["hidden"])
                 self.assertEqual({seat["mark"] for seat in widget["scheme"]["seats"]}, {"none"})
+                # no couple on the plan of a guest
+                self.assertIsNone(widget["scheme"]["couple"])
+                self.assertNotIn("couple", {seat["kind"] for seat in widget["scheme"]["seats"]})
         dishes = widget["items"] if kind == "dishes" else []
         if kind == "sets":
             for item in widget["items"]:
@@ -427,10 +447,11 @@ class StructureTest(unittest.TestCase):
                     self.assertEqual(item["note"], "")
                     for widget in item["widgets"]:
                         if widget["type"] == "seating":
-                            self.assertEqual((widget["mySeats"], widget["seatLabel"], widget["whoLabel"]), ([], "", ""))
+                            self.assertEqual((widget["mySeats"], widget["names"]), ([], []))
                             if widget["scheme"] is not None:
                                 self.assertEqual(widget["scheme"]["labels"], [])
                                 self.assertNotIn("you", {seat["kind"] for seat in widget["scheme"]["seats"]})
+                                self.assertEqual({seat["colour"] for seat in widget["scheme"]["seats"]}, {""})
                         if widget["type"] == "drinks":
                             self.assertEqual(widget["groups"], [])
 
@@ -470,15 +491,15 @@ class StructureTest(unittest.TestCase):
                     keys & {"token", "staff", "requirements", "allergens", "members", "role", "audience", "tag",
                             "letter"}
                 )
-                # no name of a seat but those of the companions: the own record
-                # keeps the name of the record and the names of its +1 seats
+                # no couple, and no name but those of the own record: the name
+                # of the record and the names of its seats
+                self.assertNotIn("couple", public)
                 for record in guests:
                     if record.get("staff") is True:
                         continue
                     own = _page.own_record(record)
-                    self.assertEqual([seat["companion"] for seat in own["seats"] if seat["companion"]],
-                                     companions(record))
-                    without = {**own, "name": "", "seats": [{**seat, "companion": ""} for seat in own["seats"]]}
+                    self.assertEqual([seat["name"] for seat in own["seats"] if seat["name"]], seat_names(record))
+                    without = {**own, "name": "", "seats": [{**seat, "name": ""} for seat in own["seats"]]}
                     text = dump(public) + dump(without)
                     for seat in record["seats"]:
                         if seat.get("name"):
@@ -491,10 +512,8 @@ class StructureTest(unittest.TestCase):
             # `public_menu` leaves the parts for the staff only out by their audience
             ("public_menu", "audience"),
             ("_public_widget", "audience"),
-            # the couple: only the seats of its members
-            ("_couple", "members"),
         }
-        for function in (_page.public_menu, _page._public_widget, _page._public_dish, _page._couple,
+        for function in (_page.public_menu, _page._public_widget, _page._public_dish,
                          _page.own_record, _page._GuestPage, _page._parts, _page._heading, _page._set,
                          _page._add_section):
             tree = ast.parse(textwrap.dedent(inspect.getsource(function)))

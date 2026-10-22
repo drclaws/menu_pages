@@ -1,8 +1,8 @@
-<!-- The seating widget; expects in `.`: domId, scheme (an object or null), seatLabel, whoLabel, legend[], rows[], footnote; in the page root: isStaff. The guest sees, in one card, the scheme, the label of the own seats in the accent colour and the name of the record, muted. The staff page shows the legend over the card, and in it the scheme, the table of the seats and the footnote. The scheme partial gets the scheme object as `.`; without one the card goes on without a drawing. -->
+<!-- The seating widget; expects in `.`: domId, scheme (an object or null), names[] (name, colour), legend[], rows[], footnote; in the page root: isStaff. The guest sees, in one card, the scheme and under it who sits at the seats of the record: a label per seat with the name, in the colour of the seat on the scheme, in the order of the seats; no seat number. The staff page shows the legend over the card, and in it the scheme, the table of the seats and the footnote. The scheme partial gets the scheme object as `.`; without one the card goes on without a drawing. -->
 <div class="widget seating-widget seating" id="{{.domId}}"><!-- if:!isStaff -->
   <div class="card seating__card">
     <!-- with:.scheme --><!-- include:partials/scheme --><!-- endwith -->
-    <p class="seating__meta"><span class="time-label time-label--strong seating__seats">{{.seatLabel}}</span><!-- if:.whoLabel --> <span class="seating__who">{{.whoLabel}}</span><!-- endif --></p>
+    <p class="seating__meta"><!-- each:.names --> <span class="time-label time-label--strong seating__name seating__name--colour-{{.colour}}">{{.name}}</span><!-- endeach --></p>
   </div><!-- endif --><!-- if:isStaff -->
   <!-- include:partials/legend -->
   <div class="card seating__card">

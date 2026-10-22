@@ -133,7 +133,7 @@ def couple(seats=(4, 5), label=COUPLE_LABEL, arm=None) -> dict:
 
 NO_COUPLE = couple((), None)
 
-#: fixture -> (table, couple, guest seats (the second one is a +1), staff letters)
+#: fixture -> (table, couple (of the staff plan), guest seats, staff letters)
 FIXTURES = {
     "l-auto": (l_table, couple(), [8, 9], {1: ["A"], 3: ["N"], 7: ["V"], 10: ["G", "L"], 12: ["N", "V"]}),
     "l-shifted": (l_table_shifted, couple(), [8, 9], {1: ["A"], 10: ["G", "L"], 14: ["L"]}),
@@ -181,17 +181,11 @@ OUTLINES = {
 }
 
 #: sha256 of the guest and staff objects of all FIXTURES (JSON, sorted keys).
-DIGEST = "fec4a5c7a8828e8da7c9d3ccf8117f40199fa3ae40b05d30548cac1e17d70b70"
+DIGEST = "eab71cb02ba8ec3f31e52446e5a4ef488f75e7a6b752396ff44e43e8b539491c"
 
 
-def guest(table, own, plus_one=(), *, pair=None, mine="mine") -> dict:
-    return guest_scheme(
-        table,
-        own_seats=list(own),
-        plus_one_seats=list(plus_one),
-        mine_text=mine,
-        **(couple() if pair is None else pair),
-    )
+def guest(table, own, *, mine="mine") -> dict:
+    return guest_scheme(table, own_seats=list(own), mine_text=mine)
 
 
 def staff(table, letters, *, pair=None) -> dict:
@@ -200,9 +194,9 @@ def staff(table, letters, *, pair=None) -> dict:
 
 def fixture_objects(name: str) -> tuple[dict, dict]:
     make, pair, own, letters = FIXTURES[name]
-    mine = " and ".join(map(str, own))
+    mine = ", ".join(f"guest {position}" for position, _number in enumerate(own, 1))
     return (
-        guest(make(), own, own[1:], pair=pair, mine=mine),
+        guest(make(), own, mine=mine),
         staff(make(), letters, pair=pair),
     )
 
@@ -288,15 +282,13 @@ class LayoutTest(unittest.TestCase):
             with self.subTest(fixture=name):
                 table = make()
                 self.assertEqual(expand_seats(table), expand_seats(expanded(table)))
-                self.assertEqual(
-                    guest(table, own, own[1:], pair=pair), guest(expanded(table), own, own[1:], pair=pair)
-                )
+                self.assertEqual(guest(table, own), guest(expanded(table), own))
                 self.assertEqual(staff(table, letters, pair=pair), staff(expanded(table), letters, pair=pair))
 
     def test_free_part_of_a_side_steps_back_from_a_neighbour_arm(self):
         table = l_table()
         table["seats"] = [{"arm": "top", "side": "bottom"}, {"arm": "right", "side": "left"}]
-        found = centres(guest(table, [1], pair=NO_COUPLE))
+        found = centres(guest(table, [1]))
         # top arm, bottom side: 40 ... 188 - 22; right arm, left side: 112 + 22 ... 260
         self.assertEqual(found[1], ("103", "134"))
         self.assertEqual(found[2], ("166", "197"))
@@ -337,7 +329,7 @@ class LayoutTest(unittest.TestCase):
                 "seats": [{"arm": "main", "side": "top", "count": count}],
             }
             check = check_table(table)
-            xs = [centre[0] for _, centre in sorted(centres(guest(table, [1], pair=NO_COUPLE)).items())]
+            xs = [centre[0] for _, centre in sorted(centres(guest(table, [1])).items())]
             return check, xs
 
         check, xs = row(200, 5)
@@ -411,7 +403,7 @@ SQUEEZED_TOP = "table.arms[0] side 'top': seats 2-7 squeezed closer than 42 px"
 
 
 def thin_centres(table: dict) -> dict[int, tuple[str, str]]:
-    return centres(guest(table, [1], pair=NO_COUPLE))
+    return centres(guest(table, [1]))
 
 
 def expected_centres(found: dict) -> dict[int, tuple[str, str]]:
@@ -499,7 +491,7 @@ class AlignTest(unittest.TestCase):
         for item in nulls["seats"]:
             item["align"] = [None] * item.get("count", 1)
         self.assertEqual(check_table(nulls), check_table(table))
-        self.assertEqual(guest(nulls, [8, 9], [9], pair=NO_COUPLE), guest(table, [8, 9], [9], pair=NO_COUPLE))
+        self.assertEqual(guest(nulls, [8, 9]), guest(table, [8, 9]))
         self.assertEqual(staff(nulls, {10: ["G"]}, pair=NO_COUPLE), staff(table, {10: ["G"]}, pair=NO_COUPLE))
 
     def test_guest_and_staff_schemes_share_the_coordinates(self):
@@ -507,7 +499,7 @@ class AlignTest(unittest.TestCase):
         expected = expected_centres(ALIGNED_CENTRES)
         for number in range(1, 20):
             with self.subTest(seat=number):
-                self.assertEqual(centres(guest(table, [number], pair=NO_COUPLE)), expected)
+                self.assertEqual(centres(guest(table, [number])), expected)
         self.assertEqual(centres(staff(table, {7: ["A"], 13: ["N", "V"]}, pair=NO_COUPLE)), expected)
 
     def test_seats_before_an_aligned_seat_that_do_not_fit_are_spread_up_to_the_end(self):
@@ -520,7 +512,7 @@ class AlignTest(unittest.TestCase):
         table = u_table()
         table["seats"][5]["align"] = [6, None, None, None]
         self.assertEqual(check_table(table).errors, [])
-        found = centres(guest(table, [1], pair=NO_COUPLE))
+        found = centres(guest(table, [1]))
         self.assertEqual([found[n][1] for n in range(8, 12)], ["87", "129", "171", "213"])
         self.assertEqual(found[8][1], found[6][1])
 
@@ -532,7 +524,7 @@ class AlignTest(unittest.TestCase):
             check_table(table),
             TableCheck([], ["table.arms[2] side 'right': seats 8-11 squeezed closer than 42 px"], 20),
         )
-        found = centres(guest(table, [1], pair=NO_COUPLE))
+        found = centres(guest(table, [1]))
         self.assertEqual([found[n][1] for n in range(8, 12)], ["129", "164", "199", "234"])
         self.assertEqual(found[8][1], found[5][1])
 
@@ -561,10 +553,10 @@ class AlignTest(unittest.TestCase):
         table["seats"][1]["align"] = [6, None]
         table["seats"][3]["align"] = [None, 8]
         self.assertEqual(check_table(table).errors, [])
-        found = centres(guest(table, [1], pair=NO_COUPLE))
+        found = centres(guest(table, [1]))
         self.assertEqual({found[n][1] for n in (2, 6, 8)}, {"82"})
         self.assertEqual((found[3][1], found[5][1]), ("124", "124"))
-        self.assertEqual(found[8][1], centres(guest(u_table(), [1], pair=NO_COUPLE))[8][1])
+        self.assertEqual(found[8][1], centres(guest(u_table(), [1]))[8][1])
 
     def test_the_shift_of_a_side_with_aligned_seats_has_no_effect(self):
         shifted = thin_l_table()
@@ -577,8 +569,7 @@ class AlignTest(unittest.TestCase):
     def test_count_and_the_expanded_list_give_the_same_result_with_align(self):
         table = thin_l_table()
         self.assertEqual(check_table(expanded(table)), check_table(table))
-        self.assertEqual(guest(expanded(table), [13, 14], [14], pair=NO_COUPLE),
-                         guest(table, [13, 14], [14], pair=NO_COUPLE))
+        self.assertEqual(guest(expanded(table), [13, 14]), guest(table, [13, 14]))
         self.assertEqual(staff(expanded(table), {7: ["A"]}, pair=NO_COUPLE),
                          staff(table, {7: ["A"]}, pair=NO_COUPLE))
 
@@ -589,8 +580,8 @@ class AlignTest(unittest.TestCase):
 
     def test_labels_follow_the_aligned_seats(self):
         # seat 14 sits 9 px lower than without align, its "You" label too
-        plain = guest(thin_l_table(aligned=False), [14], pair=NO_COUPLE)["labels"]
-        aligned = guest(thin_l_table(), [14], pair=NO_COUPLE)["labels"]
+        plain = guest(thin_l_table(aligned=False), [14])["labels"]
+        aligned = guest(thin_l_table(), [14])["labels"]
         self.assertEqual(len(plain), 1)
         self.assertEqual(len(aligned), 1)
         self.assertEqual(aligned[0]["x"], plain[0]["x"])
@@ -628,7 +619,7 @@ class OutlineTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# Labels "You" and "+1"
+# The label "You" and the colours of the seats of a guest
 # --------------------------------------------------------------------------
 
 
@@ -646,15 +637,10 @@ def narrow_table() -> dict:
 
 
 class LabelTest(unittest.TestCase):
-    def test_you_and_plus_one_next_to_seats_8_and_9_as_in_the_mockup(self):
-        scheme = guest(l_table_shifted(), [8, 9], [9])
-        self.assertEqual(
-            scheme["labels"],
-            [
-                {"isYou": True, "isPlusOne": False, "x": "283", "y": "142", "anchor": "start"},
-                {"isYou": False, "isPlusOne": True, "x": "283", "y": "184", "anchor": "start"},
-            ],
-        )
+    def test_you_next_to_seat_8_as_in_the_mockup(self):
+        scheme = guest(l_table_shifted(), [8])
+        self.assertEqual(scheme["labels"], [{"x": "283", "y": "142", "anchor": "start"}])
+        self.assertTrue(scheme["single"])
 
     def test_labels_fall_back_at_the_edge_of_the_field(self):
         # seat 1: outwards (left) is out of the field, right lies on the arm
@@ -667,91 +653,69 @@ class LabelTest(unittest.TestCase):
         self.assertEqual(label_spots(guest(l_table(), [14])), [("166", "134", "start")])
 
     def test_every_seat_of_the_l_table_has_room_for_you(self):
+        # the seats of the couple of the staff plan too: the guest plan has no couple
         for make in (l_table, l_table_shifted):
             for number in range(1, 17):
                 with self.subTest(table=make.__name__, seat=number):
-                    pair = couple((), arm="top") if number in (4, 5) else couple()
-                    labels = guest(make(), [number], pair=pair)["labels"]
+                    labels = guest(make(), [number])["labels"]
                     self.assertEqual(len(labels), 1)
-                    self.assertTrue(labels[0]["isYou"])
+                    self.assertEqual(set(labels[0]), {"x", "y", "anchor"})
 
-    def test_more_than_two_own_seats_get_no_labels(self):
-        scheme = guest(l_table(), [8, 9, 10], [9])
-        self.assertEqual(scheme["labels"], [])
-        self.assertEqual([s["kind"] for s in scheme["seats"]].count("you"), 3)
+    def test_a_record_of_more_seats_gets_no_label(self):
+        # the colours tell the seats apart
+        for own in ([8, 9], [9, 8], [8, 9, 10]):
+            with self.subTest(own=own):
+                scheme = guest(l_table(), own)
+                self.assertEqual(scheme["labels"], [])
+                self.assertFalse(scheme["single"])
+                self.assertEqual([s["kind"] for s in scheme["seats"]].count("you"), len(own))
 
-    def test_a_second_seat_without_plus_one_gets_no_label(self):
-        scheme = guest(l_table(), [8, 9])
-        self.assertEqual([(lab["isYou"], lab["isPlusOne"]) for lab in scheme["labels"]], [(True, False)])
-        self.assertFalse(scheme["single"])
-
-    def test_label_between_two_own_seats_across_a_narrow_arm(self):
-        # Seats 1 and 5 face each other across an arm 20 px wide at the left
-        # edge: the label of seat 5 can only go onto the arm, closer to the
-        # ring of seat 1 than the first two passes allow.
+    def test_a_label_at_the_edge_of_the_field_lies_on_a_narrow_arm(self):
+        # seat 5 at the left edge: outwards is out of the field, up and down
+        # are the next seats; the label goes right onto the arm 20 px wide
         table = narrow_table()
         self.assertEqual(check_table(table).errors, [])
-        self.assertEqual(
-            label_spots(guest(table, [1, 5], [5], pair=NO_COUPLE)),
-            [("111", "132.5", "start"), ("47", "132.5", "start")],
-        )
-        self.assertEqual(label_spots(guest(table, [5, 1], pair=NO_COUPLE)), [("47", "132.5", "start")])
-        self.assertEqual(label_spots(guest(table, [4, 2], pair=NO_COUPLE)), [("47", "174.5", "start")])
+        self.assertEqual(label_spots(guest(table, [5])), [("47", "132.5", "start")])
+        self.assertEqual(label_spots(guest(table, [4])), [("47", "174.5", "start")])
 
-    def test_the_ring_of_the_other_own_seat_keeps_a_label_off_in_the_first_passes(self):
-        # Seats 3 and 4 sit one above the other on the right, at the edge of
-        # the field.  The free spot below seat 3 is too close to the ring of
-        # seat 4, so the label goes left onto the arm (second pass).
-        table = {
-            "label": "Two blocks",
-            "arms": [
-                {"id": "post", "x": 224, "y": 62, "width": 37, "height": 141},
-                {"id": "block", "x": 170, "y": 48, "width": 97, "height": 103},
-            ],
-            "seats": [{"arm": "block", "side": "right", "count": 3}, {"arm": "post", "side": "right"}],
-        }
-        self.assertEqual(check_table(table).errors, [])
-        self.assertEqual(label_spots(guest(table, [3, 4], pair=NO_COUPLE)), [("268", "136", "end")])
 
-    def test_a_label_lies_on_an_arm_before_it_comes_close_to_the_other_own_seat(self):
-        # The label of seat 12 goes down onto its narrow arm (second pass)
-        # rather than up next to seat 17 (only the last pass allows that).
-        table = {
-            "label": "Bar and block",
-            "arms": [
-                {"id": "bar", "x": 25, "y": 248, "width": 266, "height": 20},
-                {"id": "block", "x": 125, "y": 48, "width": 121, "height": 109},
-            ],
-            "seats": [
-                {"arm": "block", "side": "top", "count": 2},
-                {"arm": "block", "side": "left"},
-                {"arm": "bar", "side": "bottom", "count": 6},
-                {"arm": "bar", "side": "top", "count": 6},
-                {"arm": "block", "side": "bottom", "count": 2},
-            ],
-        }
-        self.assertEqual(check_table(table).errors, [])
-        self.assertEqual(label_spots(guest(table, [12, 17], pair=NO_COUPLE)), [("137", "254", "middle")])
+class ColourTest(unittest.TestCase):
+    def test_each_seat_of_the_guest_takes_the_colour_of_its_place_in_the_record(self):
+        self.assertEqual(_table.SEAT_COLOURS, ("1", "2", "3"))
+        for own in ([8], [9, 8], [14, 8, 3]):
+            with self.subTest(own=own):
+                scheme = guest(l_table(), own)
+                colours = {int(seat["number"]): seat["colour"] for seat in scheme["seats"] if seat["colour"]}
+                self.assertEqual(colours, dict(zip(own, _table.SEAT_COLOURS)))
+                for seat in scheme["seats"]:
+                    mine = int(seat["number"]) in own
+                    self.assertEqual((seat["kind"], seat["ring"], seat["r"]),
+                                     ("you", True, "16.25") if mine else ("regular", False, "14.25"))
 
-    def test_two_labels_without_room_raise_with_seat_numbers_only(self):
-        # As above, but the outward spot of seat 2 is taken by the seats of a
-        # second arm: both labels need the one spot on the narrow arm.
-        table = narrow_table()
-        table["label"] = "Qzlabel"
-        table["arms"] = [
-            {"id": "qzwest", "x": 48, "y": 37, "width": 20, "height": 233},
-            {"id": "qzeast", "x": 172, "y": 37, "width": 20, "height": 233},
-        ]
-        table["seats"] = [
-            {"arm": "qzwest", "side": "right", "count": 3},
-            {"arm": "qzwest", "side": "left", "count": 3},
-            {"arm": "qzeast", "side": "left", "count": 3},
-        ]
-        self.assertEqual(check_table(table).errors, [])
-        self.assertEqual(label_spots(guest(table, [5], pair=NO_COUPLE)), [("47", "153.5", "start")])
+    def test_more_seats_than_colours_is_an_error(self):
         with self.assertRaises(TableError) as caught:
-            guest(table, [5, 2], [2], pair=NO_COUPLE)
-        self.assertEqual(caught.exception.errors, ["seat 2: no room for the '+1' label"])
+            guest(l_table(), [8, 9, 10, 11])
+        self.assertEqual(caught.exception.errors, ["own_seats: expected at most 3 seats, one per colour"])
+
+    def test_the_guest_plan_has_no_couple(self):
+        # the couple sits at seats 4 and 5 of the staff plan: plain seats for
+        # a guest, no couple label; a seat of the couple in a record (refused
+        # by the checks of the data) would take the colour of the guest
+        staff_object = staff(l_table(), {})
+        self.assertEqual([seat["number"] for seat in staff_object["seats"] if seat["kind"] == "couple"], ["4", "5"])
+        self.assertIsNotNone(staff_object["couple"])
+        scheme = guest(l_table(), [8])
+        self.assertIsNone(scheme["couple"])
+        self.assertNotIn("couple", {seat["kind"] for seat in scheme["seats"]})
+        scheme = guest(l_table(), [4])
+        seat = scheme["seats"][3]
+        self.assertEqual((seat["kind"], seat["colour"]), ("you", "1"))
+
+    def test_the_staff_plan_has_no_colours(self):
+        for name in FIXTURES:
+            with self.subTest(fixture=name):
+                _guest_object, staff_object = fixture_objects(name)
+                self.assertEqual({seat["colour"] for seat in staff_object["seats"]}, {""})
 
 
 # --------------------------------------------------------------------------
@@ -834,10 +798,6 @@ COUPLE_CASES = [
     (2, l_table, ([4, 5], "Ivan\nVera", None), "error", [LABEL_ERROR]),
     (16, l_table, ([4, 5], "Ivan Ivanovich and Vera Longname", None), "warning",
      ["couple.label: may not fit inside the arm"]),
-    (14, row_table, ([4], COUPLE_LABEL, None), "error", [
-        "couple.label: leaves no room for the 'You' label of seat 3",
-        "couple.label: leaves no room for the 'You' label of seat 5",
-    ]),
 ]
 
 
@@ -846,7 +806,7 @@ class CoupleTest(unittest.TestCase):
         for make in (l_table, l_table_shifted):
             with self.subTest(table=make.__name__):
                 self.assertEqual(
-                    guest(make(), [8])["couple"], {"text": COUPLE_TEXT, "x": "114", "y": "86", "vertical": False}
+                    staff(make(), {})["couple"], {"text": COUPLE_TEXT, "x": "114", "y": "86", "vertical": False}
                 )
 
     def test_couple_label_on_a_vertical_arm(self):
@@ -854,7 +814,7 @@ class CoupleTest(unittest.TestCase):
         self.assertEqual(scheme["couple"], {"text": COUPLE_TEXT, "x": "214", "y": "186", "vertical": True})
 
     def test_no_couple_label_without_a_label(self):
-        scheme = guest(l_table(), [8], pair=couple(label=None))
+        scheme = staff(l_table(), {}, pair=couple(label=None))
         self.assertIsNone(scheme["couple"])
         self.assertEqual([s["kind"] for s in scheme["seats"]].count("couple"), 2)
 
@@ -874,10 +834,17 @@ class CoupleTest(unittest.TestCase):
                     self.assertEqual(check.errors, messages)
 
     def test_couple_label_on_the_only_spot_of_a_you_label(self):
-        # a squeezed row at the top of the field: the only room for a label of
-        # a middle seat is on the arm, where the couple label is (COUPLE_CASES)
+        # a squeezed row at the top of the field: the only room for the label
+        # of a middle seat is on the arm, where the couple label is; the two
+        # never meet: the couple is on the staff plan alone, "You" on the
+        # plan of a guest alone
         self.assertEqual(check_table(row_table()).errors, [])
-        self.assertEqual(check_couple(row_table(), [4], None, None), TableCheck([], [], 7))
+        self.assertEqual(label_spots(guest(row_table(), [3])), [("124.5", "62", "middle")])
+        self.assertEqual(staff(row_table(), {}, pair=couple((4,)))["couple"],
+                         {"text": COUPLE_TEXT, "x": "159", "y": "71", "vertical": False})
+        for label in (None, COUPLE_LABEL):
+            with self.subTest(label=label):
+                self.assertEqual(check_couple(row_table(), [4], label, None), TableCheck([], [], 7))
 
     def test_check_couple_with_a_broken_table_checks_what_it_can(self):
         table = l_table()
@@ -1124,22 +1091,23 @@ class SchemeTest(unittest.TestCase):
     def test_guest_object(self):
         table = l_table()
         table["label"] = 'L-shaped <table> & "co"'
-        scheme = guest(table, [8, 9], [9], mine="8 and 9")
+        scheme = guest(table, [8, 9], mine="the text of the caller")
         self.assertEqual(
             {key: scheme[key] for key in ("width", "height", "hidden", "tableLabel", "total", "mine", "single")},
             {"width": "318", "height": "310", "hidden": False, "tableLabel": 'L-shaped <table> & "co"',
-             "total": "16", "mine": "8 and 9", "single": False},
+             "total": "16", "mine": "the text of the caller", "single": False},
         )
-        self.assertEqual(scheme["badges"], [])
+        self.assertEqual((scheme["badges"], scheme["labels"], scheme["couple"]), ([], [], None))
         self.assertEqual({seat["mark"] for seat in scheme["seats"]}, {"none"})
-        seat8 = scheme["seats"][7]
         self.assertEqual(
-            seat8,
-            {"number": "8", "cx": "262", "cy": "139", "r": "16.25", "kind": "you", "mark": "none",
-             "ring": True, "ringR": "21"},
+            scheme["seats"][7:9],
+            [{"number": "8", "cx": "262", "cy": "139", "r": "16.25", "kind": "you", "mark": "none",
+              "colour": "1", "ring": True, "ringR": "21"},
+             {"number": "9", "cx": "262", "cy": "181", "r": "16.25", "kind": "you", "mark": "none",
+              "colour": "2", "ring": True, "ringR": "21"}],
         )
-        self.assertEqual(scheme["seats"][3]["kind"], "couple")
-        self.assertEqual(scheme["seats"][0]["r"], "14.25")
+        self.assertEqual(scheme["seats"][3]["kind"], "regular")
+        self.assertEqual((scheme["seats"][0]["r"], scheme["seats"][0]["colour"]), ("14.25", ""))
         self.assertTrue(guest(l_table(), [3], mine="3")["single"])
 
     def test_staff_object(self):
@@ -1148,6 +1116,8 @@ class SchemeTest(unittest.TestCase):
         self.assertEqual((scheme["mine"], scheme["single"], scheme["labels"]), ("", False, []))
         self.assertNotIn("you", {seat["kind"] for seat in scheme["seats"]})
         self.assertEqual({seat["ring"] for seat in scheme["seats"]}, {False})
+        self.assertEqual({seat["colour"] for seat in scheme["seats"]}, {""})
+        self.assertEqual([seat["number"] for seat in scheme["seats"] if seat["kind"] == "couple"], ["4", "5"])
         flagged = [seat for seat in scheme["seats"] if seat["mark"] == "flagged"]
         self.assertEqual([(seat["number"], seat["r"]) for seat in flagged], [("10", "13.75")])
         self.assertEqual([badge["letter"] for badge in scheme["badges"]], ["G", "L"])
@@ -1158,6 +1128,8 @@ class SchemeTest(unittest.TestCase):
                 with self.subTest(fixture=name, hidden=scheme["hidden"]):
                     self.assertLessEqual({seat["kind"] for seat in scheme["seats"]}, set(_table.KINDS))
                     self.assertLessEqual({seat["mark"] for seat in scheme["seats"]}, set(_table.MARKS))
+                    self.assertLessEqual({seat["colour"] for seat in scheme["seats"]},
+                                         {"", *_table.SEAT_COLOURS})
                     self.assertLessEqual({lab["anchor"] for lab in scheme["labels"]}, set(_table.ANCHORS))
 
     def test_guest_object_has_no_dietary_data(self):
@@ -1168,17 +1140,16 @@ class SchemeTest(unittest.TestCase):
                 self.assertNotIn("flagged", json.dumps(guest_object))
                 self.assertFalse(guest_object["hidden"])
 
-    def test_guest_function_takes_no_letters(self):
+    def test_guest_function_takes_no_letters_and_no_couple(self):
         parameters = inspect.signature(guest_scheme).parameters
         self.assertNotIn("letters", parameters)
-        self.assertEqual(
-            list(parameters),
-            ["table", "couple_seats", "couple_label", "couple_arm", "own_seats", "plus_one_seats", "mine_text"],
-        )
+        self.assertEqual(list(parameters), ["table", "own_seats", "mine_text"])
         for name in list(parameters)[1:]:
             self.assertIs(parameters[name].kind, inspect.Parameter.KEYWORD_ONLY)
         with self.assertRaises(TypeError):
-            guest_scheme(l_table(), own_seats=[8], plus_one_seats=[], mine_text="8", letters={8: ["A"]}, **couple())
+            guest_scheme(l_table(), own_seats=[8], mine_text="8", letters={8: ["A"]})
+        with self.assertRaises(TypeError):
+            guest_scheme(l_table(), own_seats=[8], mine_text="8", **couple())
         self.assertEqual(
             list(inspect.signature(staff_scheme).parameters),
             ["table", "couple_seats", "couple_label", "couple_arm", "letters"],
@@ -1233,13 +1204,12 @@ class InputTest(unittest.TestCase):
             lambda: guest(l_table(), []),
             lambda: guest(l_table(), [8, 8]),
             lambda: guest(l_table(), [17]),
-            lambda: guest(l_table(), [8, 9], [8]),
-            lambda: guest(l_table(), [4]),
+            lambda: guest(l_table(), [8, 9, 10, 11]),
             lambda: guest(l_table(), [8], mine=None),
-            lambda: guest(l_table(), [8], pair=couple((4, 5, 6))),
-            lambda: guest(l_table(), [8], pair=couple(arm="middle")),
-            lambda: guest(l_table(), [8], pair=couple((), arm=None)),
-            lambda: guest(l_table(), [8], pair=couple(label="")),
+            lambda: staff(l_table(), {}, pair=couple((4, 5, 6))),
+            lambda: staff(l_table(), {}, pair=couple(arm="middle")),
+            lambda: staff(l_table(), {}, pair=couple((), arm=None)),
+            lambda: staff(l_table(), {}, pair=couple(label="")),
             lambda: staff(l_table(), {0: ["A"]}),
             lambda: staff(l_table(), {8: "A"}),
             lambda: staff(l_table(), {8: [""]}),

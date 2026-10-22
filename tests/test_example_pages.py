@@ -202,18 +202,40 @@ class ExamplePagesTest(unittest.TestCase):
         self.assertIn("Shared plates for the table", guest)
         self.assertNotIn("on the table by 19:15", guest)
 
-    def test_the_label_of_the_seats_names_the_companions_with_a_name(self):
+    def test_the_names_under_the_plan_take_the_colours_of_the_seats(self):
+        # a name per seat in the order of the record, a +1 without a name is
+        # "your guest", a record for two shows the names of its seats
         expected = {
-            "data": {"Greta": "Greta and Hugo", "Trent": "Trent and Oscar", "Heidi": "Heidi and your guest",
-                     "Peggy and Walter": "Peggy and Walter", "Rupert": "Rupert"},
-            "data-plain": {"Astrid": "Astrid and your guest", "Ezra": "Ezra"},
+            "data": {"Greta": ["Greta", "Hugo"], "Trent": ["Trent", "Oscar"], "Heidi": ["Heidi", "your guest"],
+                     "Peggy and Walter": ["Peggy", "Walter"], "Rupert": ["Rupert"]},
+            "data-plain": {"Astrid": ["Astrid", "your guest"], "Ezra": ["Ezra"]},
         }
         for name, (_out, _menu, guests, pages, _staff) in self.built.items():
             tokens = {record.get("name"): record["token"] for record in guests}
-            for person, label in expected[name].items():
+            for person, names in expected[name].items():
                 with self.subTest(set=name, record=person):
-                    self.assertEqual(re.findall(r'<span class="seating__who">([^<]*)</span>', pages[tokens[person]]),
-                                     [label])
+                    found = re.findall(r'<span class="time-label time-label--strong seating__name '
+                                       r'seating__name--colour-(\d)">([^<]*)</span>', pages[tokens[person]])
+                    self.assertEqual(found, [(str(position), who) for position, who in enumerate(names, 1)])
+
+    def test_a_guest_page_names_no_seat_by_its_number(self):
+        for name, (_out, menu, _guests, pages, staff) in self.built.items():
+            for token, page in pages.items():
+                seats = re.search(r'<section class="section" id="s-seats".*?</section>', page, re.S).group(0)
+                text = " ".join(re.sub(r"<[^>]+>", " ", seats).split())
+                with self.subTest(set=name, page=token):
+                    if token == staff:
+                        self.assertIn('<text class="seat__number"' if "table" in menu else "seat-number", seats)
+                        continue
+                    self.assertNotRegex(text, r"\d")
+                    self.assertNotIn("seat__number", seats)
+                    label = re.search(r'aria-label="([^"]*)"', seats)
+                    if "table" in menu:
+                        total = sum(item.get("count", 1) for item in menu["table"]["seats"])
+                        self.assertEqual(re.findall(r"\d+", label.group(1)), [str(total)])
+                        # no couple on the plan of a guest
+                        self.assertNotIn("seat--couple", seats)
+                        self.assertNotIn("scheme__couple", seats)
 
     def test_the_table_of_the_seats_names_the_companions_with_a_name(self):
         # a +1 with a name: the name first, in bold, without "+1"; without

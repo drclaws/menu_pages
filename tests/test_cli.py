@@ -310,27 +310,26 @@ class ValidateTest(unittest.TestCase):
             ],
         )
 
-    def test_a_plan_without_room_for_a_label_fails(self):
+    def test_a_record_of_more_seats_than_colours_fails(self):
+        # the page of a guest tells the seats of the record apart by colour
+        # alone: three colours, so at most three seats; the message holds
+        # no name
         menu, guests = fixtures.plain()
-        menu["table"] = {
-            "label": "Two narrow arms",
-            "arms": [
-                {"id": "west", "x": 48, "y": 37, "width": 20, "height": 233},
-                {"id": "east", "x": 172, "y": 37, "width": 20, "height": 233},
-            ],
-            "seats": [
-                {"arm": "west", "side": "right", "count": 3},
-                {"arm": "west", "side": "left", "count": 3},
-                {"arm": "east", "side": "left", "count": 3},
-            ],
-        }
-        guests[:3] = [{"token": "lynx-5qd8", "name": "Lev", "seats": [{"number": 5}, {"number": 2, "plusOne": True}]}]
+        guests[:3] = [{"token": "lynx-5qd8", "name": "Lev",
+                       "seats": [{"number": 1}, {"number": 2, "plusOne": True}, {"number": 3, "plusOne": True},
+                                 {"number": 4, "plusOne": True}]}]
         result = self.validate(menu, guests)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stderr.splitlines()[-2:],
-            ["error: guests.json: guest #1: seat 2: no room for the '+1' label", "validate: failed with 1 error(s)"],
+            ["error: guests.json: guest #1: field 'seats' lists 4 seats, at most 3 are allowed: the page of a "
+             "guest marks each seat of the record in a colour of its own (split the record in two)",
+             "validate: failed with 1 error(s)"],
         )
+        self.assertNotIn("Lev", result.stderr)
+        guests[0]["seats"].pop()
+        result = self.validate(menu, guests)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_missing_directory_or_file(self):
         missing = self.base / "nowhere"
